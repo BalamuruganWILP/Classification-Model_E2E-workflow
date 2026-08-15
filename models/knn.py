@@ -1,22 +1,20 @@
 """
-Decision Tree Model
-===================
-
-Cardiotocography ML Assignment
 
 This script:
 1. Loads training and test data
 2. Separates features and target
-3. Trains a Decision Tree
-4. Makes predictions on the untouched test set
-5. Evaluates the model
-6. Saves the trained model
-7. Saves evaluation metrics
+3. Scales features using StandardScaler
+4. Trains KNN
+5. Makes predictions on the untouched test set
+6. Evaluates the model
+7. Saves the trained model
+8. Saves the fitted scaler
+9. Saves evaluation metrics
 
 IMPORTANT:
-This is the BASELINE Decision Tree model.
+This is the BASELINE KNN model.
 
-No scaling, SMOTE, undersampling, or class weighting
+No SMOTE, undersampling, or class weighting
 is applied in this baseline.
 """
 
@@ -29,7 +27,7 @@ import joblib
 # PROJECT PATHS
 # ============================================================
 
-# models/decision_tree.py
+# models/knn.py
 #
 # parent        -> models
 # parent.parent -> project root
@@ -51,6 +49,8 @@ from preprocessing import (
     prepare_features_and_target,
 )
 
+from scaling import scale_train_test
+
 from evaluation import (
     print_evaluation,
     save_metrics,
@@ -61,7 +61,7 @@ from evaluation import (
 # IMPORT MACHINE LEARNING MODEL
 # ============================================================
 
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
 
 
 # ============================================================
@@ -76,10 +76,22 @@ MODEL_DIRECTORY = PROJECT_ROOT / "model"
 
 RESULTS_DIRECTORY = PROJECT_ROOT / "results"
 
-MODEL_FILE = (
-    MODEL_DIRECTORY /
-    "decision_tree.pkl"
-)
+MODEL_FILE = MODEL_DIRECTORY / "knn.pkl"
+
+SCALER_FILE = MODEL_DIRECTORY / "knn_scaler.pkl"
+
+
+# ============================================================
+# KNN CONFIGURATION
+# ============================================================
+
+# Baseline value.
+# We will tune this later.
+N_NEIGHBORS = 5
+
+WEIGHTS = "uniform"
+
+METRIC = "euclidean"
 
 
 # ============================================================
@@ -90,14 +102,14 @@ def main():
 
     print("\n")
     print("=" * 70)
-    print("DECISION TREE - BASELINE")
+    print("K-NEAREST NEIGHBORS - BASELINE")
     print("=" * 70)
 
     # --------------------------------------------------------
     # 1. Check files
     # --------------------------------------------------------
 
-    print("\n[1/6] Checking data files...")
+    print("\n[1/7] Checking data files...")
 
     if not TRAIN_FILE.exists():
         raise FileNotFoundError(
@@ -116,7 +128,7 @@ def main():
     # 2. Load datasets
     # --------------------------------------------------------
 
-    print("\n[2/6] Loading datasets...")
+    print("\n[2/7] Loading datasets...")
 
     train_df = load_training_data(
         TRAIN_FILE
@@ -139,7 +151,7 @@ def main():
     # --------------------------------------------------------
 
     print(
-        "\n[3/6] Separating features and target..."
+        "\n[3/7] Separating features and target..."
     )
 
     X_train, y_train = (
@@ -179,20 +191,62 @@ def main():
     )
 
     # --------------------------------------------------------
-    # 4. Create and train model
+    # 4. Scale features
     # --------------------------------------------------------
 
     print(
-        "\n[4/6] Training Decision Tree..."
+        "\n[4/7] Scaling features..."
     )
 
-    model = DecisionTreeClassifier(
-        criterion="gini",
-        random_state=42
+    (
+        X_train_scaled,
+        X_test_scaled,
+        scaler
+    ) = scale_train_test(
+        X_train,
+        X_test
+    )
+
+    print(
+        "✓ StandardScaler fitted on training data."
+    )
+
+    print(
+        "✓ Training data transformed."
+    )
+
+    print(
+        "✓ Test data transformed using the same scaler."
+    )
+
+    # --------------------------------------------------------
+    # 5. Create and train KNN
+    # --------------------------------------------------------
+
+    print(
+        "\n[5/7] Training KNN..."
+    )
+
+    print(
+        f"Number of neighbors : {N_NEIGHBORS}"
+    )
+
+    print(
+        f"Weighting           : {WEIGHTS}"
+    )
+
+    print(
+        f"Distance metric     : {METRIC}"
+    )
+
+    model = KNeighborsClassifier(
+        n_neighbors=N_NEIGHBORS,
+        weights=WEIGHTS,
+        metric=METRIC
     )
 
     model.fit(
-        X_train,
+        X_train_scaled,
         y_train
     )
 
@@ -200,38 +254,30 @@ def main():
         "✓ Model training completed."
     )
 
-    print(
-        f"Tree depth    : {model.get_depth()}"
-    )
-
-    print(
-        f"Number leaves : {model.get_n_leaves()}"
-    )
-
     # --------------------------------------------------------
-    # 5. Test and evaluate model
+    # 6. Test and evaluate
     # --------------------------------------------------------
 
     print(
-        "\n[5/6] Evaluating on untouched test data..."
+        "\n[6/7] Evaluating on untouched test data..."
     )
 
     y_pred = model.predict(
-        X_test
+        X_test_scaled
     )
 
     metrics = print_evaluation(
         y_test,
         y_pred,
-        "Decision Tree - Baseline"
+        "KNN - Baseline"
     )
 
     # --------------------------------------------------------
-    # 6. Save model and results
+    # 7. Save model, scaler and results
     # --------------------------------------------------------
 
     print(
-        "\n[6/6] Saving model and results..."
+        "\n[7/7] Saving model and results..."
     )
 
     MODEL_DIRECTORY.mkdir(
@@ -244,7 +290,7 @@ def main():
         exist_ok=True
     )
 
-    # Save trained model
+    # Save KNN model
     joblib.dump(
         model,
         MODEL_FILE
@@ -254,16 +300,26 @@ def main():
         f"✓ Model saved to:\n  {MODEL_FILE}"
     )
 
+    # Save scaler
+    joblib.dump(
+        scaler,
+        SCALER_FILE
+    )
+
+    print(
+        f"✓ Scaler saved to:\n  {SCALER_FILE}"
+    )
+
     # Save metrics
     save_metrics(
         metrics,
-        "decision_tree_baseline",
+        "knn_baseline",
         RESULTS_DIRECTORY
     )
 
     print("\n")
     print("=" * 70)
-    print("DECISION TREE COMPLETED SUCCESSFULLY")
+    print("KNN COMPLETED SUCCESSFULLY")
     print("=" * 70)
 
 
