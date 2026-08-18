@@ -1,79 +1,81 @@
-"""
-Cardiotocography ML Assignment
-==============================
-
-Streamlit Model Evaluation Dashboard
-
-Features
---------
-1. Upload a CSV test dataset
-2. Use the bundled test_data.csv
-3. Download the bundled test dataset
-4. Select any trained model
-5. Display selected-model metrics prominently
-6. Display selected-model confusion matrix
-7. Display selected-model classification report
-8. Compare all available models
-9. Display confusion matrices and reports for all models
-10. Display class distribution
-11. Display weighted vs macro metrics
-12. Display Random Forest feature importance
-
-Note: This application ONLY evaluates already-trained models.
-
-
-"""
-
-from pathlib import Path
-
+import os
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from sklearn.metrics import (
     accuracy_score,
+    roc_auc_score,
     precision_score,
     recall_score,
     f1_score,
-    balanced_accuracy_score,
     matthews_corrcoef,
+    balanced_accuracy_score,
     confusion_matrix,
-    classification_report,
+    classification_report
 )
 
 
-
+# ============================================================
 # PAGE CONFIGURATION
+# ============================================================
 
 st.set_page_config(
-    page_title="CTG Model Evaluation",
+    page_title="CTG Classification Model Evaluation",
     page_icon="🫀",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="wide"
 )
 
 
 # ============================================================
-# PROJECT PATHS
+# PATH CONFIGURATION
 # ============================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-TEST_FILE = PROJECT_ROOT / "test_data.csv"
+MODEL_DIR = os.path.join(BASE_DIR, "model")
 
-MODEL_DIRECTORY = PROJECT_ROOT / "model"
+TEST_DATA_FILE = os.path.join(
+    BASE_DIR,
+    "test_data.csv"
+)
 
 
 # ============================================================
-# CONSTANTS
+# DATASET CONFIGURATION
 # ============================================================
 
 TARGET_COLUMN = "NSP"
 
 NON_PREDICTIVE_COLUMNS = [
     "CLASS"
+]
+
+FEATURE_COLUMNS = [
+    "LB",
+    "AC",
+    "FM",
+    "UC",
+    "DL",
+    "DS",
+    "DP",
+    "ASTV",
+    "MSTV",
+    "ALTV",
+    "MLTV",
+    "Width",
+    "Min",
+    "Max",
+    "Nmax",
+    "Nzeros",
+    "Mode",
+    "Mean",
+    "Median",
+    "Variance",
+    "Tendency"
 ]
 
 
@@ -86,173 +88,89 @@ MODEL_CONFIG = {
     "Logistic Regression": {
         "model_file": "logistic_regression.pkl",
         "scaler_file": "logistic_regression_scaler.pkl",
-        "requires_scaling": True,
-        "description": (
-            "Linear classification model using logistic regression."
-        ),
+        "requires_scaling": True
     },
 
     "Decision Tree": {
         "model_file": "decision_tree.pkl",
         "scaler_file": None,
-        "requires_scaling": False,
-        "description": (
-            "Tree-based classification model using recursive feature splitting."
-        ),
+        "requires_scaling": False
     },
 
     "KNN": {
         "model_file": "knn.pkl",
         "scaler_file": "knn_scaler.pkl",
-        "requires_scaling": True,
-        "description": (
-            "Distance-based classifier using nearest observations."
-        ),
+        "requires_scaling": True
     },
 
-    "Gaussian Naive Bayes": {
+    "Naive Bayes": {
         "model_file": "naive_bayes.pkl",
         "scaler_file": None,
-        "requires_scaling": False,
-        "description": (
-            "Probabilistic classifier assuming Gaussian feature distributions."
-        ),
+        "requires_scaling": False
     },
 
     "Random Forest": {
         "model_file": "random_forest.pkl",
         "scaler_file": None,
-        "requires_scaling": False,
-        "description": (
-            "Ensemble model combining predictions from multiple decision trees."
-        ),
-    },
+        "requires_scaling": False
+    }
 }
 
 
 # ============================================================
-# CSS
+# PAGE TITLE
 # ============================================================
+
+st.title("🫀 Cardiotocography Classification")
+st.subheader("Machine Learning Model Evaluation Dashboard")
 
 st.markdown(
     """
-    <style>
+    This application evaluates five classification models trained on
+    the UCI Cardiotocography dataset.
 
-    .main-title {
-        font-size: 2.4rem;
-        font-weight: 700;
-        margin-bottom: 0.2rem;
-    }
+    **Target variable:** `NSP`
 
-    .subtitle {
-        font-size: 1.05rem;
-        color: #666666;
-        margin-bottom: 1.5rem;
-    }
-
-    .section-title {
-        font-size: 1.5rem;
-        font-weight: 650;
-        margin-top: 1.2rem;
-        margin-bottom: 0.8rem;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
+    - **1:** Normal
+    - **2:** Suspect
+    - **3:** Pathologic
+    """
 )
 
 
 # ============================================================
-# LOAD MODEL
+# HELPER FUNCTIONS
 # ============================================================
+
+@st.cache_data
+def load_csv(file):
+
+    return pd.read_csv(file)
+
 
 @st.cache_resource
 def load_model(model_path):
 
-    if not model_path.exists():
-        raise FileNotFoundError(
-            f"Model file not found:\n{model_path}"
-        )
-
     return joblib.load(model_path)
 
 
-# ============================================================
-# LOAD SCALER
-# ============================================================
-
-@st.cache_resource
-def load_scaler(scaler_path):
-
-    if not scaler_path.exists():
-        raise FileNotFoundError(
-            f"Scaler file not found:\n{scaler_path}"
-        )
-
-    return joblib.load(scaler_path)
-
-
-# ============================================================
-# LOAD BUNDLED TEST DATA
-# ============================================================
-
-@st.cache_data
-def load_bundled_test_data():
-
-    if not TEST_FILE.exists():
-        raise FileNotFoundError(
-            f"Bundled test dataset not found:\n{TEST_FILE}"
-        )
-
-    return pd.read_csv(TEST_FILE)
-
-
-# ============================================================
-# PREPARE DATA
-# ============================================================
-
-def prepare_test_data(df):
+def prepare_dataset(df):
 
     """
-    Prepare uploaded or bundled dataset.
-
-    Required:
-        NSP target column
-
-    Optional:
-        CLASS is removed because it is non-predictive.
-
-    Returns:
-        X, y
+    Validate and prepare dataset for model prediction.
     """
 
     df = df.copy()
 
     # --------------------------------------------------------
-    # Validate target
+    # Check target column
     # --------------------------------------------------------
 
     if TARGET_COLUMN not in df.columns:
 
         raise ValueError(
-            f"Required target column '{TARGET_COLUMN}' "
-            "was not found in the uploaded CSV."
+            f"Target column '{TARGET_COLUMN}' is missing from the dataset."
         )
-
-    # --------------------------------------------------------
-    # Target
-    # --------------------------------------------------------
-
-    y = df[TARGET_COLUMN].copy()
-
-    # --------------------------------------------------------
-    # Features
-    # --------------------------------------------------------
-
-    X = df.drop(
-        columns=[TARGET_COLUMN]
-    )
 
     # --------------------------------------------------------
     # Remove non-predictive columns
@@ -260,336 +178,1067 @@ def prepare_test_data(df):
 
     for column in NON_PREDICTIVE_COLUMNS:
 
-        if column in X.columns:
+        if column in df.columns:
 
-            X = X.drop(
-                columns=[column]
-            )
+            df = df.drop(columns=[column])
 
     # --------------------------------------------------------
-    # Validate numeric features
+    # Check expected feature columns
     # --------------------------------------------------------
-
-    non_numeric_columns = (
-        X.select_dtypes(
-            exclude=np.number
-        ).columns.tolist()
-    )
-
-    if non_numeric_columns:
-
-        raise ValueError(
-            "The following feature columns are not numeric:\n"
-            + ", ".join(non_numeric_columns)
-        )
-
-    # --------------------------------------------------------
-    # Missing values
-    # --------------------------------------------------------
-
-    missing_count = int(
-        X.isna().sum().sum()
-    )
-
-    if missing_count > 0:
-
-        raise ValueError(
-            f"The dataset contains {missing_count} missing "
-            "feature values. Please provide a cleaned dataset."
-        )
-
-    return X, y
-
-
-# ============================================================
-# VALIDATE FEATURES
-# ============================================================
-
-def validate_features(X, expected_features):
-
-    """
-    Ensure uploaded dataset contains exactly the features
-    expected by the trained models.
-    """
 
     missing_features = [
         feature
-        for feature in expected_features
-        if feature not in X.columns
-    ]
-
-    extra_features = [
-        feature
-        for feature in X.columns
-        if feature not in expected_features
+        for feature in FEATURE_COLUMNS
+        if feature not in df.columns
     ]
 
     if missing_features:
 
         raise ValueError(
-            "The uploaded dataset is missing required "
-            f"feature columns:\n{missing_features}"
+            "The following required feature columns are missing:\n\n"
+            + ", ".join(missing_features)
         )
 
-    # Keep only the features used during training
-    X = X[expected_features].copy()
+    # --------------------------------------------------------
+    # Select features in correct order
+    # --------------------------------------------------------
 
-    return X, extra_features
+    X = df[FEATURE_COLUMNS].copy()
+
+    y = df[TARGET_COLUMN].copy()
+
+    # --------------------------------------------------------
+    # Missing value check
+    # --------------------------------------------------------
+
+    if X.isnull().sum().sum() > 0:
+
+        missing_count = X.isnull().sum().sum()
+
+        raise ValueError(
+            f"The dataset contains {missing_count} missing feature values."
+        )
+
+    if y.isnull().sum() > 0:
+
+        raise ValueError(
+            "The target column contains missing values."
+        )
+
+    return X, y
 
 
-# ============================================================
-# GET EXPECTED FEATURES
-# ============================================================
-
-def get_expected_features():
+def evaluate_model(
+    model_name,
+    X_test,
+    y_test
+):
 
     """
-    Determine feature names from the bundled test dataset.
+    Load model, apply required preprocessing,
+    generate predictions and calculate evaluation metrics.
     """
 
-    bundled_df = load_bundled_test_data()
+    config = MODEL_CONFIG[model_name]
 
-    X, _ = prepare_test_data(
-        bundled_df
+    # --------------------------------------------------------
+    # Load model
+    # --------------------------------------------------------
+
+    model_path = os.path.join(
+        MODEL_DIR,
+        config["model_file"]
     )
 
-    return X.columns.tolist()
+    if not os.path.exists(model_path):
 
+        raise FileNotFoundError(
+            f"Model file not found:\n{model_path}"
+        )
 
-# ============================================================
-# CALCULATE METRICS
-# ============================================================
+    model = load_model(model_path)
 
-def calculate_metrics(
-    y_true,
-    y_pred
-):
+    # --------------------------------------------------------
+    # Apply scaling where required
+    # --------------------------------------------------------
 
-    return {
+    X_input = X_test.copy()
 
-        "Accuracy": accuracy_score(
-            y_true,
-            y_pred
-        ),
+    if config["requires_scaling"]:
 
-        "Precision": precision_score(
-            y_true,
-            y_pred,
-            average="weighted",
-            zero_division=0
-        ),
+        scaler_path = os.path.join(
+            MODEL_DIR,
+            config["scaler_file"]
+        )
 
-        "Recall": recall_score(
-            y_true,
-            y_pred,
-            average="weighted",
-            zero_division=0
-        ),
+        if not os.path.exists(scaler_path):
 
-        "F1 Score": f1_score(
-            y_true,
-            y_pred,
-            average="weighted",
-            zero_division=0
-        ),
+            raise FileNotFoundError(
+                f"Scaler file not found:\n{scaler_path}"
+            )
 
-        "Macro Precision": precision_score(
-            y_true,
-            y_pred,
-            average="macro",
-            zero_division=0
-        ),
+        scaler = load_model(scaler_path)
 
-        "Macro Recall": recall_score(
-            y_true,
-            y_pred,
-            average="macro",
-            zero_division=0
-        ),
+        X_input = scaler.transform(X_test)
 
-        "Macro F1": f1_score(
-            y_true,
-            y_pred,
-            average="macro",
-            zero_division=0
-        ),
+    # --------------------------------------------------------
+    # Predictions
+    # --------------------------------------------------------
 
-        "Balanced Accuracy": balanced_accuracy_score(
-            y_true,
-            y_pred
-        ),
+    y_pred = model.predict(X_input)
 
-        "MCC": matthews_corrcoef(
-            y_true,
-            y_pred
-        ),
-    }
+    # Convert predictions to numpy array
+    y_pred = np.asarray(y_pred)
 
+    # --------------------------------------------------------
+    # Probability predictions for AUC
+    # --------------------------------------------------------
 
-# ============================================================
-# CLASSIFICATION REPORT
-# ============================================================
+    y_proba = None
+    auc = np.nan
 
-def get_classification_report_df(
-    y_true,
-    y_pred
-):
+    if hasattr(model, "predict_proba"):
 
-    report = classification_report(
-        y_true,
+        try:
+
+            y_proba = model.predict_proba(X_input)
+
+            # ------------------------------------------------
+            # Multiclass ROC-AUC
+            #
+            # One-vs-Rest strategy
+            # Macro averaging across classes
+            # ------------------------------------------------
+
+            auc = roc_auc_score(
+                y_test,
+                y_proba,
+                multi_class="ovr",
+                average="macro"
+            )
+
+        except Exception as e:
+
+            st.warning(
+                f"AUC could not be calculated for "
+                f"{model_name}: {e}"
+            )
+
+            auc = np.nan
+
+    # --------------------------------------------------------
+    # Classification metrics
+    # --------------------------------------------------------
+
+    accuracy = accuracy_score(
+        y_test,
+        y_pred
+    )
+
+    precision = precision_score(
+        y_test,
         y_pred,
-        output_dict=True,
+        average="weighted",
         zero_division=0
     )
 
-    rows = []
+    recall = recall_score(
+        y_test,
+        y_pred,
+        average="weighted",
+        zero_division=0
+    )
 
-    for key, value in report.items():
+    f1 = f1_score(
+        y_test,
+        y_pred,
+        average="weighted",
+        zero_division=0
+    )
 
-        if key in [
-            "accuracy",
-            "macro avg",
-            "weighted avg"
-        ]:
-            continue
+    mcc = matthews_corrcoef(
+        y_test,
+        y_pred
+    )
 
-        rows.append(
-            {
-                "Class": f"NSP {key}",
-                "Precision": value["precision"],
-                "Recall": value["recall"],
-                "F1 Score": value["f1-score"],
-                "Support": int(
-                    value["support"]
-                ),
-            }
+    balanced_accuracy = balanced_accuracy_score(
+        y_test,
+        y_pred
+    )
+
+    # --------------------------------------------------------
+    # Confusion Matrix
+    # --------------------------------------------------------
+
+    cm = confusion_matrix(
+        y_test,
+        y_pred,
+        labels=[1, 2, 3]
+    )
+
+    # --------------------------------------------------------
+    # Classification Report
+    # --------------------------------------------------------
+
+    report = classification_report(
+        y_test,
+        y_pred,
+        labels=[1, 2, 3],
+        target_names=[
+            "Normal",
+            "Suspect",
+            "Pathologic"
+        ],
+        zero_division=0,
+        output_dict=True
+    )
+
+    report_df = pd.DataFrame(report).transpose()
+
+    # --------------------------------------------------------
+    # Return everything
+    # --------------------------------------------------------
+
+    return {
+
+        "model": model,
+
+        "y_pred": y_pred,
+
+        "y_proba": y_proba,
+
+        "accuracy": accuracy,
+
+        "auc": auc,
+
+        "precision": precision,
+
+        "recall": recall,
+
+        "f1": f1,
+
+        "mcc": mcc,
+
+        "balanced_accuracy": balanced_accuracy,
+
+        "confusion_matrix": cm,
+
+        "classification_report": report_df
+    }
+
+
+def display_metrics(results):
+
+    """
+    Display the six primary assignment metrics.
+    """
+
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+    # --------------------------------------------------------
+    # Accuracy
+    # --------------------------------------------------------
+
+    with col1:
+
+        st.metric(
+            "Accuracy",
+            f"{results['accuracy']:.4f}"
         )
 
-    # Add summary rows
+    # --------------------------------------------------------
+    # AUC
+    # --------------------------------------------------------
 
-    rows.append(
+    with col2:
+
+        if pd.notna(results["auc"]):
+
+            st.metric(
+                "AUC",
+                f"{results['auc']:.4f}"
+            )
+
+        else:
+
+            st.metric(
+                "AUC",
+                "N/A"
+            )
+
+    # --------------------------------------------------------
+    # Precision
+    # --------------------------------------------------------
+
+    with col3:
+
+        st.metric(
+            "Precision",
+            f"{results['precision']:.4f}"
+        )
+
+    # --------------------------------------------------------
+    # Recall
+    # --------------------------------------------------------
+
+    with col4:
+
+        st.metric(
+            "Recall",
+            f"{results['recall']:.4f}"
+        )
+
+    # --------------------------------------------------------
+    # F1
+    # --------------------------------------------------------
+
+    with col5:
+
+        st.metric(
+            "F1",
+            f"{results['f1']:.4f}"
+        )
+
+    # --------------------------------------------------------
+    # MCC
+    # --------------------------------------------------------
+
+    with col6:
+
+        st.metric(
+            "MCC",
+            f"{results['mcc']:.4f}"
+        )
+
+
+def display_confusion_matrix(
+    cm,
+    title
+):
+
+    """
+    Display confusion matrix.
+    """
+
+    fig, ax = plt.subplots(
+        figsize=(6, 5)
+    )
+
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=[
+            "Normal",
+            "Suspect",
+            "Pathologic"
+        ],
+        yticklabels=[
+            "Normal",
+            "Suspect",
+            "Pathologic"
+        ],
+        ax=ax
+    )
+
+    ax.set_xlabel(
+        "Predicted Class"
+    )
+
+    ax.set_ylabel(
+        "Actual Class"
+    )
+
+    ax.set_title(
+        title
+    )
+
+    st.pyplot(
+        fig,
+        use_container_width=False
+    )
+
+    plt.close(fig)
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+st.sidebar.header(
+    "Dataset Options"
+)
+
+
+# ============================================================
+# DATASET SELECTION
+# ============================================================
+
+dataset_option = st.sidebar.radio(
+    "Choose dataset",
+    [
+        "Use bundled test data",
+        "Upload CSV"
+    ]
+)
+
+
+# ============================================================
+# LOAD BUNDLED TEST DATA
+# ============================================================
+
+if dataset_option == "Use bundled test data":
+
+    if not os.path.exists(TEST_DATA_FILE):
+
+        st.error(
+            f"Bundled test data not found:\n{TEST_DATA_FILE}"
+        )
+
+        st.stop()
+
+    df = load_csv(
+        TEST_DATA_FILE
+    )
+
+    st.sidebar.success(
+        "Bundled test data loaded"
+    )
+
+    # --------------------------------------------------------
+    # Download button
+    # --------------------------------------------------------
+
+    with open(
+        TEST_DATA_FILE,
+        "rb"
+    ) as file:
+
+        st.sidebar.download_button(
+            label="⬇️ Download Test Data",
+            data=file,
+            file_name="test_data.csv",
+            mime="text/csv"
+        )
+
+
+# ============================================================
+# UPLOAD CSV
+# ============================================================
+
+else:
+
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload test CSV",
+        type=["csv"]
+    )
+
+    if uploaded_file is None:
+
+        st.info(
+            "Please upload a CSV file to continue."
+        )
+
+        st.stop()
+
+    try:
+
+        df = load_csv(
+            uploaded_file
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Unable to read CSV file: {e}"
+        )
+
+        st.stop()
+
+
+# ============================================================
+# DATASET PREVIEW
+# ============================================================
+
+st.header(
+    "1. Dataset Information"
+)
+
+try:
+
+    X_test, y_test = prepare_dataset(
+        df
+    )
+
+except Exception as e:
+
+    st.error(
+        str(e)
+    )
+
+    st.stop()
+
+
+# ------------------------------------------------------------
+# Dataset information
+# ------------------------------------------------------------
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+
+    st.metric(
+        "Test Samples",
+        len(X_test)
+    )
+
+with col2:
+
+    st.metric(
+        "Features",
+        X_test.shape[1]
+    )
+
+with col3:
+
+    st.metric(
+        "Target",
+        TARGET_COLUMN
+    )
+
+with col4:
+
+    st.metric(
+        "Number of Classes",
+        y_test.nunique()
+    )
+
+
+# ============================================================
+# CLASS DISTRIBUTION
+# ============================================================
+
+with st.expander(
+    "View Target Class Distribution"
+):
+
+    class_distribution = (
+        y_test
+        .value_counts()
+        .sort_index()
+        .rename_axis("NSP")
+        .reset_index(name="Count")
+    )
+
+    class_distribution["Percentage"] = (
+        class_distribution["Count"]
+        / len(y_test)
+        * 100
+    )
+
+    st.dataframe(
+        class_distribution,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ============================================================
+# DATA PREVIEW
+# ============================================================
+
+with st.expander(
+    "View Dataset Preview"
+):
+
+    st.dataframe(
+        df.head(10),
+        use_container_width=True
+    )
+
+
+# ============================================================
+# MODEL SELECTION
+# ============================================================
+
+st.header(
+    "2. Model Selection"
+)
+
+selected_model = st.selectbox(
+    "Select a model to evaluate",
+    list(MODEL_CONFIG.keys())
+)
+
+
+# ============================================================
+# EVALUATE SELECTED MODEL
+# ============================================================
+
+st.header(
+    "3. Selected Model Evaluation"
+)
+
+with st.spinner(
+    f"Evaluating {selected_model}..."
+):
+
+    try:
+
+        selected_results = evaluate_model(
+            selected_model,
+            X_test,
+            y_test
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Error evaluating {selected_model}: {e}"
+        )
+
+        st.stop()
+
+
+st.subheader(
+    f"{selected_model}"
+)
+
+
+# ============================================================
+# DISPLAY SELECTED MODEL METRICS
+# ============================================================
+
+display_metrics(
+    selected_results
+)
+
+
+# ============================================================
+# ADDITIONAL METRICS
+# ============================================================
+
+with st.expander(
+    "View Additional Metrics"
+):
+
+    additional_metrics = pd.DataFrame(
         {
-            "Class": "Macro Average",
-            "Precision": report[
-                "macro avg"
-            ]["precision"],
-            "Recall": report[
-                "macro avg"
-            ]["recall"],
-            "F1 Score": report[
-                "macro avg"
-            ]["f1-score"],
-            "Support": int(
-                report[
-                    "macro avg"
-                ]["support"]
-            ),
+            "Metric": [
+                "Balanced Accuracy",
+                "Weighted Precision",
+                "Weighted Recall",
+                "Weighted F1",
+                "MCC"
+            ],
+
+            "Value": [
+                selected_results[
+                    "balanced_accuracy"
+                ],
+
+                selected_results[
+                    "precision"
+                ],
+
+                selected_results[
+                    "recall"
+                ],
+
+                selected_results[
+                    "f1"
+                ],
+
+                selected_results[
+                    "mcc"
+                ]
+            ]
         }
     )
 
-    rows.append(
-        {
-            "Class": "Weighted Average",
-            "Precision": report[
-                "weighted avg"
-            ]["precision"],
-            "Recall": report[
-                "weighted avg"
-            ]["recall"],
-            "F1 Score": report[
-                "weighted avg"
-            ]["f1-score"],
-            "Support": int(
-                report[
-                    "weighted avg"
-                ]["support"]
-            ),
-        }
+    additional_metrics["Value"] = (
+        additional_metrics["Value"]
+        .map(lambda x: f"{x:.4f}")
     )
 
-    return pd.DataFrame(rows)
+    st.dataframe(
+        additional_metrics,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+
 
 
 # ============================================================
 # CONFUSION MATRIX
 # ============================================================
 
-def plot_confusion_matrix(
-    y_true,
-    y_pred,
-    model_name,
-    labels
+st.subheader(
+    "Confusion Matrix"
+)
+
+display_confusion_matrix(
+    selected_results["confusion_matrix"],
+    f"{selected_model} - Confusion Matrix"
+)
+
+
+# ============================================================
+# CLASSIFICATION REPORT
+# ============================================================
+
+st.subheader(
+    "Classification Report"
+)
+
+st.dataframe(
+    selected_results[
+        "classification_report"
+    ].style.format(
+        {
+            "precision": "{:.4f}",
+            "recall": "{:.4f}",
+            "f1-score": "{:.4f}",
+            "support": "{:.0f}"
+        }
+    ),
+    use_container_width=True
+)
+
+
+# ============================================================
+# ALL MODEL EVALUATION
+# ============================================================
+
+st.header(
+    "4. All Model Comparison"
+)
+
+all_results = {}
+
+progress_bar = st.progress(
+    0
+)
+
+model_names = list(
+    MODEL_CONFIG.keys()
+)
+
+for index, model_name in enumerate(
+    model_names
 ):
 
-    cm = confusion_matrix(
-        y_true,
-        y_pred,
-        labels=labels
+    try:
+
+        all_results[model_name] = evaluate_model(
+            model_name,
+            X_test,
+            y_test
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Error evaluating {model_name}: {e}"
+        )
+
+    progress_bar.progress(
+        (index + 1)
+        / len(model_names)
     )
 
-    fig, ax = plt.subplots(
-        figsize=(5.5, 4.5)
+progress_bar.empty()
+
+
+# ============================================================
+# COMPARISON TABLE
+# ============================================================
+
+comparison_data = []
+
+for model_name, results in all_results.items():
+
+    comparison_data.append(
+        {
+            "ML Model Name": model_name,
+
+            "Accuracy":
+                results["accuracy"],
+
+            "AUC":
+                results["auc"],
+
+            "Precision":
+                results["precision"],
+
+            "Recall":
+                results["recall"],
+
+            "F1":
+                results["f1"],
+
+            "MCC":
+                results["mcc"]
+        }
     )
 
-    image = ax.imshow(
-        cm,
-        interpolation="nearest",
-        aspect="auto"
+
+comparison_df = pd.DataFrame(
+    comparison_data
+)
+
+
+st.subheader(
+    "Model Performance Comparison"
+)
+
+
+# ------------------------------------------------------------
+# Format display
+# ------------------------------------------------------------
+
+display_df = comparison_df.copy()
+
+for column in [
+    "Accuracy",
+    "AUC",
+    "Precision",
+    "Recall",
+    "F1",
+    "MCC"
+]:
+
+    display_df[column] = display_df[column].apply(
+        lambda x:
+        f"{x:.4f}"
+        if pd.notna(x)
+        else "N/A"
     )
 
-    fig.colorbar(
-        image,
-        ax=ax
+
+st.dataframe(
+    display_df,
+    use_container_width=True,
+    hide_index=True
+)
+
+# ============================================================
+# METRIC COMPARISON CHART
+# ============================================================
+
+st.subheader(
+    "Model Performance Comparison"
+)
+
+# ------------------------------------------------------------
+# Metrics required by the assignment
+# ------------------------------------------------------------
+
+metrics = [
+    "Accuracy",
+    "AUC",
+    "Precision",
+    "Recall",
+    "F1",
+    "MCC"
+]
+
+# ------------------------------------------------------------
+# Prepare comparison data
+# ------------------------------------------------------------
+
+plot_df = comparison_df[
+    [
+        "ML Model Name",
+        "Accuracy",
+        "AUC",
+        "Precision",
+        "Recall",
+        "F1",
+        "MCC"
+    ]
+].copy()
+
+plot_df = plot_df.set_index(
+    "ML Model Name"
+)
+
+# ------------------------------------------------------------
+# Create chart
+# ------------------------------------------------------------
+
+fig, ax = plt.subplots(
+    figsize=(13, 6)
+)
+
+# X-axis positions
+x = np.arange(
+    len(plot_df.index)
+)
+
+# Six metrics -> narrower bars
+width = 0.13
+
+# ------------------------------------------------------------
+# Plot each metric
+# ------------------------------------------------------------
+
+for i, metric in enumerate(metrics):
+
+    values = plot_df[metric].values
+
+    bars = ax.bar(
+        x + (
+            i - 2.5
+        ) * width,
+        values,
+        width,
+        label=metric
     )
 
-    ax.set(
-        xticks=np.arange(
-            len(labels)
-        ),
-        yticks=np.arange(
-            len(labels)
-        ),
-        xticklabels=[
-            f"NSP {label}"
-            for label in labels
-        ],
-        yticklabels=[
-            f"NSP {label}"
-            for label in labels
-        ],
-        xlabel="Predicted Class",
-        ylabel="Actual Class",
-        title=f"{model_name} — Confusion Matrix",
-    )
+    # --------------------------------------------------------
+    # Add values above bars
+    # --------------------------------------------------------
 
-    threshold = cm.max() / 2
-
-    for i in range(
-        cm.shape[0]
+    for bar, value in zip(
+        bars,
+        values
     ):
 
-        for j in range(
-            cm.shape[1]
-        ):
+        if pd.notna(value):
 
             ax.text(
-                j,
-                i,
-                str(cm[i, j]),
+                bar.get_x()
+                + bar.get_width() / 2,
+
+                value + 0.015,
+
+                f"{value:.3f}",
+
                 ha="center",
-                va="center",
-                color=(
-                    "white"
-                    if cm[i, j] > threshold
-                    else "black"
-                ),
-                fontsize=12,
-                fontweight="bold",
+                va="bottom",
+
+                fontsize=8,
+
+                rotation=90
             )
 
-    fig.tight_layout()
+# ------------------------------------------------------------
+# X-axis
+# ------------------------------------------------------------
 
-    return fig
+ax.set_xticks(
+    x
+)
+
+ax.set_xticklabels(
+    plot_df.index,
+    rotation=20,
+    ha="right"
+)
+
+# ------------------------------------------------------------
+# Y-axis
+# ------------------------------------------------------------
+
+ax.set_ylabel(
+    "Score"
+)
+
+ax.set_ylim(
+    0,
+    1.10
+)
+
+# ------------------------------------------------------------
+# Title
+# ------------------------------------------------------------
+
+ax.set_title(
+    "Performance Comparison — All Models",
+    fontsize=15,
+    fontweight="bold"
+)
+
+# ------------------------------------------------------------
+# Grid
+# ------------------------------------------------------------
+
+ax.grid(
+    axis="y",
+    alpha=0.25
+)
+
+ax.set_axisbelow(
+    True
+)
+
+# ------------------------------------------------------------
+# Remove unnecessary borders
+# ------------------------------------------------------------
+
+ax.spines[
+    "top"
+].set_visible(
+    False
+)
+
+ax.spines[
+    "right"
+].set_visible(
+    False
+)
+
+# ------------------------------------------------------------
+# Legend
+# ------------------------------------------------------------
+
+ax.legend(
+    loc="upper center",
+    bbox_to_anchor=(
+        0.5,
+        -0.12
+    ),
+    ncol=3,
+    frameon=False
+)
+
+# ------------------------------------------------------------
+# Layout
+# ------------------------------------------------------------
+
+fig.tight_layout()
+
+# ------------------------------------------------------------
+# Display in Streamlit
+# ------------------------------------------------------------
+
+st.pyplot(
+    fig,
+    use_container_width=True
+)
+
+plt.close(fig)
+
+# ============================================================
+# BEST MODEL
+# ============================================================
+
+if not comparison_df.empty:
+
+    best_model_row = comparison_df.loc[
+        comparison_df["F1"].idxmax()
+    ]
+
+    st.success(
+        f"🏆 Best model based on weighted F1: "
+        f"**{best_model_row['ML Model Name']}** "
+        f"({best_model_row['F1']:.4f})"
+    )
+
 
 
 # ============================================================
@@ -602,9 +1251,10 @@ def plot_metric_comparison(
 
     metrics = [
         "Accuracy",
+        "AUC",
         "Precision",
         "Recall",
-        "F1 Score",
+        "F1",
     ]
 
     plot_df = results_df[
@@ -668,993 +1318,232 @@ def plot_metric_comparison(
 
 
 # ============================================================
-# FEATURE IMPORTANCE
-# ============================================================
-
-def plot_feature_importance(
-    model,
-    feature_names,
-    top_n=10
-):
-
-    if not hasattr(
-        model,
-        "feature_importances_"
-    ):
-        return None
-
-    importance_df = pd.DataFrame(
-        {
-            "Feature": feature_names,
-            "Importance": model.feature_importances_,
-        }
-    )
-
-    importance_df = (
-        importance_df
-        .sort_values(
-            "Importance",
-            ascending=False
-        )
-        .head(top_n)
-        .sort_values(
-            "Importance",
-            ascending=True
-        )
-    )
-
-    fig, ax = plt.subplots(
-        figsize=(9, 5)
-    )
-
-    ax.barh(
-        importance_df["Feature"],
-        importance_df["Importance"]
-    )
-
-    ax.set_xlabel(
-        "Importance"
-    )
-
-    ax.set_title(
-        "Random Forest — Top 10 Feature Importance"
-    )
-
-    ax.grid(
-        axis="x",
-        alpha=0.25
-    )
-
-    fig.tight_layout()
-
-    return fig
-
-
-# ============================================================
-# HEADER
-# ============================================================
-
-st.markdown(
-    '<div class="main-title">'
-    '🫀 Cardiotocography Classification'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="subtitle">'
-    'Machine Learning Model Evaluation Dashboard'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-
-    st.header(
-        "⚙️ Evaluation Settings"
-    )
-
-    st.subheader(
-        "1. Select Dataset"
-    )
-
-    dataset_source = st.radio(
-        "Dataset source",
-        [
-            "Use bundled test data",
-            "Upload CSV"
-        ],
-        index=0
-    )
-
-    st.divider()
-
-    st.subheader(
-        "2. Select Model"
-    )
-
-    selected_model = st.selectbox(
-        "Model",
-        list(
-            MODEL_CONFIG.keys()
-        )
-    )
-
-    st.divider()
-
-    st.subheader(
-        "Baseline Configuration"
-    )
-
-    st.caption(
-        """
-        Models are evaluated using saved `.pkl`files.
-
-        """
-    )
-
-
-# ============================================================
-# DATASET SELECTION
-# ============================================================
-
-uploaded_file = None
-
-if dataset_source == "Upload CSV":
-
-    uploaded_file = st.file_uploader(
-        "Upload test CSV",
-        type=["csv"],
-        help=(
-            "CSV must contain NSP and the 21 "
-            "predictor variables."
-        )
-    )
-
-    if uploaded_file is None:
-
-        st.info(
-            "Please upload a CSV file from the sidebar "
-            "to begin evaluation."
-        )
-
-        st.stop()
-
-    try:
-
-        test_df = pd.read_csv(
-            uploaded_file
-        )
-
-        dataset_name = uploaded_file.name
-
-    except Exception as error:
-
-        st.error(
-            f"Unable to read uploaded CSV:\n{error}"
-        )
-
-        st.stop()
-
-else:
-
-    try:
-
-        test_df = load_bundled_test_data()
-
-        dataset_name = TEST_FILE.name
-
-    except Exception as error:
-
-        st.error(
-            f"Unable to load bundled test data:\n{error}"
-        )
-
-        st.stop()
-
-
-# ============================================================
-# DOWNLOAD BUNDLED TEST DATA
-# ============================================================
-
-if TEST_FILE.exists():
-
-    try:
-
-        bundled_test_df = load_bundled_test_data()
-
-        csv_data = bundled_test_df.to_csv(
-            index=False
-        ).encode(
-            "utf-8"
-        )
-
-        st.sidebar.download_button(
-            label="⬇️ Download Bundled Test Data",
-            data=csv_data,
-            file_name="test_data.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# PREPARE DATASET
-# ============================================================
-
-try:
-
-    X_test, y_test = prepare_test_data(
-        test_df
-    )
-
-    expected_features = (
-        get_expected_features()
-    )
-
-    X_test, extra_features = validate_features(
-        X_test,
-        expected_features
-    )
-
-except Exception as error:
-
-    st.error(
-        f"Dataset validation failed:\n\n{error}"
-    )
-
-    st.stop()
-
-
-# ============================================================
-# DATASET INFORMATION
-# ============================================================
-
-st.info(
-    f"""
-    **Dataset in use:** `{dataset_name}`
-
-    **Samples:** {len(test_df):,}  
-    **Features:** {X_test.shape[1]}  
-    **Target:** `{TARGET_COLUMN}`  
-    **Classes:** {y_test.nunique()}
-    """
-)
-
-if extra_features:
-
-    st.warning(
-        "The following extra columns were ignored because "
-        "they were not used during model training:\n\n"
-        + ", ".join(extra_features)
-    )
-
-
-# ============================================================
-# CLASS DISTRIBUTION
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">'
-    'Dataset Overview'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-
-    st.metric(
-        "Samples",
-        f"{len(test_df):,}"
-    )
-
-with col2:
-
-    st.metric(
-        "Features",
-        X_test.shape[1]
-    )
-
-with col3:
-
-    st.metric(
-        "Classes",
-        y_test.nunique()
-    )
-
-with col4:
-
-    st.metric(
-        "Target",
-        TARGET_COLUMN
-    )
-
-
-class_counts = (
-    y_test
-    .value_counts()
-    .sort_index()
-)
-
-class_percentages = (
-    y_test
-    .value_counts(
-        normalize=True
-    )
-    .sort_index()
-    * 100
-)
-
-distribution_df = pd.DataFrame(
-    {
-        "NSP Class": class_counts.index,
-        "Count": class_counts.values,
-        "Percentage": class_percentages.values,
-    }
-)
-
-distribution_df[
-    "Percentage"
-] = distribution_df[
-    "Percentage"
-].round(2)
-
-
-with st.expander(
-    "View Class Distribution"
-):
-
-    col1, col2 = st.columns(
-        [1, 1]
-    )
-
-    with col1:
-
-        st.dataframe(
-            distribution_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    with col2:
-
-        majority_class = (
-            class_percentages.idxmax()
-        )
-
-        minority_class = (
-            class_percentages.idxmin()
-        )
-
-        st.warning(
-            f"""
-            **Class imbalance**
-
-            Majority class:
-
-            **NSP {majority_class}**
-            ({class_percentages.max():.2f}%)
-
-            Minority class:
-
-            **NSP {minority_class}**
-            ({class_percentages.min():.2f}%)
-
-            Therefore, weighted metrics should not be
-            considered alone.
-            """
-        )
-
-
-# ============================================================
-# EVALUATE SELECTED MODEL
-# ============================================================
-
-selected_config = MODEL_CONFIG[
-    selected_model
-]
-
-selected_model_path = (
-    MODEL_DIRECTORY /
-    selected_config["model_file"]
-)
-
-try:
-
-    selected_model_object = load_model(
-        selected_model_path
-    )
-
-except Exception as error:
-
-    st.error(
-        f"Unable to load {selected_model}:\n{error}"
-    )
-
-    st.stop()
-
-
-# ------------------------------------------------------------
-# Apply scaler
-# ------------------------------------------------------------
-
-X_selected = X_test.copy()
-
-if selected_config[
-    "requires_scaling"
-]:
-
-    scaler_path = (
-        MODEL_DIRECTORY /
-        selected_config["scaler_file"]
-    )
-
-    try:
-
-        scaler = load_scaler(
-            scaler_path
-        )
-
-        X_selected = scaler.transform(
-            X_selected
-        )
-
-    except Exception as error:
-
-        st.error(
-            f"Unable to load scaler for "
-            f"{selected_model}:\n{error}"
-        )
-
-        st.stop()
-
-
-# ------------------------------------------------------------
-# Prediction
-# ------------------------------------------------------------
-
-try:
-
-    selected_predictions = (
-        selected_model_object.predict(
-            X_selected
-        )
-    )
-
-except Exception as error:
-
-    st.error(
-        f"Prediction failed for {selected_model}:\n{error}"
-    )
-
-    st.stop()
-
-
-# ============================================================
-# SELECTED MODEL — TOP METRICS
-# ============================================================
-
-selected_metrics = calculate_metrics(
-    y_test,
-    selected_predictions
-)
-
-st.divider()
-
-st.header(
-    f"🎯 Selected Model: {selected_model}"
-)
-
-st.caption(
-    MODEL_CONFIG[
-        selected_model
-    ]["description"]
-)
-
-
-# ------------------------------------------------------------
-# Primary metrics
-# ------------------------------------------------------------
-
-metric_cols = st.columns(5)
-
-primary_metrics = [
-    ("Accuracy", "Accuracy"),
-    ("Precision", "Precision"),
-    ("Recall", "Recall"),
-    ("F1 Score", "F1 Score"),
-    ("Balanced Accuracy", "Balanced Accuracy"),
-]
-
-for column, (
-    label,
-    key
-) in zip(
-    metric_cols,
-    primary_metrics
-):
-
-    with column:
-
-        st.metric(
-            label,
-            f"{selected_metrics[key]:.4f}"
-        )
-
-
-# ------------------------------------------------------------
-# Additional metrics
-# ------------------------------------------------------------
-
-with st.expander(
-    "View Additional Metrics"
-):
-
-    additional_metrics_df = pd.DataFrame(
-        {
-            "Metric": [
-                "Macro Precision",
-                "Macro Recall",
-                "Macro F1",
-                "MCC",
-            ],
-            "Score": [
-                selected_metrics[
-                    "Macro Precision"
-                ],
-                selected_metrics[
-                    "Macro Recall"
-                ],
-                selected_metrics[
-                    "Macro F1"
-                ],
-                selected_metrics[
-                    "MCC"
-                ],
-            ],
-        }
-    )
-
-    st.dataframe(
-        additional_metrics_df.style.format(
-            {
-                "Score": "{:.4f}"
-            }
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ============================================================
-# SELECTED MODEL — CONFUSION MATRIX + REPORT
+# MODEL PERFORMANCE HEATMAP
 # ============================================================
 
 st.subheader(
-    "Selected Model Evaluation"
+    "Model Performance Comparison"
 )
 
-selected_col1, selected_col2 = st.columns(
-    [1, 1]
+heatmap_df = comparison_df.set_index(
+    "ML Model Name"
+)[
+    [
+        "Accuracy",
+        "AUC",
+        "Precision",
+        "Recall",
+        "F1",
+        "MCC"
+    ]
+].copy()
+
+
+# ------------------------------------------------------------
+# Create heatmap
+# ------------------------------------------------------------
+
+fig, ax = plt.subplots(
+    figsize=(12, 5)
 )
 
-labels = sorted(
-    y_test.unique()
+sns.heatmap(
+    heatmap_df,
+    annot=True,
+    fmt=".4f",
+    cmap="YlGnBu",
+    vmin=0,
+    vmax=1,
+    linewidths=0.5,
+    cbar_kws={
+        "label": "Score"
+    },
+    ax=ax
 )
 
-with selected_col1:
-
-    st.markdown(
-        "### Confusion Matrix"
-    )
-
-    cm_fig = plot_confusion_matrix(
-        y_test,
-        selected_predictions,
-        selected_model,
-        labels
-    )
-
-    st.pyplot(
-        cm_fig,
-        use_container_width=True
-    )
-
-    plt.close(
-        cm_fig
-    )
-
-
-with selected_col2:
-
-    st.markdown(
-        "### Classification Report"
-    )
-
-    selected_report_df = (
-        get_classification_report_df(
-            y_test,
-            selected_predictions
-        )
-    )
-
-    st.dataframe(
-        selected_report_df.style.format(
-            {
-                "Precision": "{:.4f}",
-                "Recall": "{:.4f}",
-                "F1 Score": "{:.4f}",
-            }
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ============================================================
-# ALL MODEL EVALUATION
-# ============================================================
-
-st.divider()
-
-st.header(
-    "📊 All Model Evaluation"
+ax.set_title(
+    "Classification Model Performance",
+    fontsize=16,
+    fontweight="bold",
+    pad=15
 )
 
-st.caption(
-    "All available trained models are evaluated on the same "
-    "dataset selected above."
+ax.set_xlabel(
+    "Evaluation Metric",
+    fontsize=11
 )
 
-
-all_results = {}
-
-all_predictions = {}
-
-all_models = {}
-
-model_errors = {}
-
-
-for model_name, config in MODEL_CONFIG.items():
-
-    try:
-
-        # ----------------------------------------------------
-        # Load model
-        # ----------------------------------------------------
-
-        model_path = (
-            MODEL_DIRECTORY /
-            config["model_file"]
-        )
-
-        model = load_model(
-            model_path
-        )
-
-        all_models[
-            model_name
-        ] = model
-
-        # ----------------------------------------------------
-        # Prepare features
-        # ----------------------------------------------------
-
-        X_input = X_test.copy()
-
-        # ----------------------------------------------------
-        # Scaling
-        # ----------------------------------------------------
-
-        if config[
-            "requires_scaling"
-        ]:
-
-            scaler_path = (
-                MODEL_DIRECTORY /
-                config["scaler_file"]
-            )
-
-            scaler = load_scaler(
-                scaler_path
-            )
-
-            X_input = scaler.transform(
-                X_input
-            )
-
-        # ----------------------------------------------------
-        # Predict
-        # ----------------------------------------------------
-
-        y_pred = model.predict(
-            X_input
-        )
-
-        all_predictions[
-            model_name
-        ] = y_pred
-
-        # ----------------------------------------------------
-        # Metrics
-        # ----------------------------------------------------
-
-        all_results[
-            model_name
-        ] = calculate_metrics(
-            y_test,
-            y_pred
-        )
-
-    except Exception as error:
-
-        model_errors[
-            model_name
-        ] = str(error)
-
-
-# ============================================================
-# DISPLAY MODEL ERRORS
-# ============================================================
-
-if model_errors:
-
-    st.warning(
-        "Some models could not be evaluated."
-    )
-
-    for model_name, error in model_errors.items():
-
-        st.error(
-            f"**{model_name}**: {error}"
-        )
-
-
-if not all_results:
-
-    st.error(
-        "No models were successfully evaluated."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# ALL MODEL METRICS TABLE
-# ============================================================
-
-all_results_df = pd.DataFrame(
-    all_results
-).T
-
-all_results_df = all_results_df.sort_values(
-    "Recall",
-    ascending=False
+ax.set_ylabel(
+    "Machine Learning Model",
+    fontsize=11
 )
 
-st.subheader(
-    "Evaluation Metrics — All Models"
+plt.xticks(
+    rotation=0
 )
 
-display_columns = [
-    "Accuracy",
-    "Precision",
-    "Recall",
-    "F1 Score",
-    "Macro Recall",
-    "Balanced Accuracy",
-    "MCC",
-]
-
-st.dataframe(
-    all_results_df[
-        display_columns
-    ].style.format(
-        "{:.4f}"
-    ),
-    use_container_width=True
+plt.yticks(
+    rotation=0
 )
 
-
-# ============================================================
-# ALL MODEL METRIC CHART
-# ============================================================
-
-st.subheader(
-    "Metric Comparison"
-)
-
-metric_fig = plot_metric_comparison(
-    all_results_df
-)
+plt.tight_layout()
 
 st.pyplot(
-    metric_fig,
+    fig,
     use_container_width=True
 )
 
-plt.close(
-    metric_fig
-)
-
+plt.close(fig)
 
 # ============================================================
 # ALL MODEL CONFUSION MATRICES
 # ============================================================
 
-st.divider()
-
 st.header(
-    "🔲 Confusion Matrices — All Models"
+    "5. Confusion Matrices – All Models"
 )
 
-for model_name, y_pred in all_predictions.items():
+for model_name, results in all_results.items():
 
     with st.expander(
-        f"{model_name} — Confusion Matrix & Classification Report",
-        expanded=False
+        f"{model_name} – Confusion Matrix"
     ):
 
-        col1, col2 = st.columns(
-            [1, 1]
+        display_confusion_matrix(
+            results["confusion_matrix"],
+            f"{model_name} - Confusion Matrix"
         )
 
-        with col1:
 
-            fig = plot_confusion_matrix(
-                y_test,
-                y_pred,
-                model_name,
-                labels
-            )
+# ============================================================
+# ALL MODEL CLASSIFICATION REPORTS
+# ============================================================
 
-            st.pyplot(
-                fig,
-                use_container_width=True
-            )
+st.header(
+    "6. Classification Reports – All Models"
+)
 
-            plt.close(fig)
+for model_name, results in all_results.items():
 
-        with col2:
+    with st.expander(
+        f"{model_name} – Classification Report"
+    ):
 
-            report_df = (
-                get_classification_report_df(
-                    y_test,
-                    y_pred
-                )
-            )
-
-            st.dataframe(
-                report_df.style.format(
-                    {
-                        "Precision": "{:.4f}",
-                        "Recall": "{:.4f}",
-                        "F1 Score": "{:.4f}",
-                    }
-                ),
-                use_container_width=True,
-                hide_index=True
-            )
+        st.dataframe(
+            results[
+                "classification_report"
+            ].style.format(
+                {
+                    "precision": "{:.4f}",
+                    "recall": "{:.4f}",
+                    "f1-score": "{:.4f}",
+                    "support": "{:.0f}"
+                }
+            ),
+            use_container_width=True
+        )
 
 
 # ============================================================
 # RANDOM FOREST FEATURE IMPORTANCE
 # ============================================================
 
-st.divider()
+if "Random Forest" in all_results:
 
-st.header(
-    "🌲 Random Forest Feature Importance"
-)
-
-rf_model = all_models.get(
-    "Random Forest"
-)
-
-if rf_model is not None:
-
-    rf_fig = plot_feature_importance(
-        rf_model,
-        X_test.columns,
-        top_n=10
+    st.header(
+        "7. Random Forest Feature Importance"
     )
 
-    if rf_fig is not None:
+    rf_model = all_results[
+        "Random Forest"
+    ]["model"]
+
+    if hasattr(
+        rf_model,
+        "feature_importances_"
+    ):
+
+        importance_df = pd.DataFrame(
+            {
+                "Feature": FEATURE_COLUMNS,
+
+                "Importance":
+                    rf_model.feature_importances_
+            }
+        )
+
+        importance_df = (
+            importance_df
+            .sort_values(
+                "Importance",
+                ascending=False
+            )
+            .reset_index(drop=True)
+        )
+
+        # ----------------------------------------------------
+        # Top features table
+        # ----------------------------------------------------
+
+        st.subheader(
+            "Feature Importance Ranking"
+        )
+
+        st.dataframe(
+            importance_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # ----------------------------------------------------
+        # Feature importance chart
+        # ----------------------------------------------------
+
+        fig, ax = plt.subplots(
+            figsize=(10, 7)
+        )
+
+        sns.barplot(
+            data=importance_df,
+            x="Importance",
+            y="Feature",
+            ax=ax
+        )
+
+        ax.set_title(
+            "Random Forest Feature Importance"
+        )
+
+        ax.set_xlabel(
+            "Importance"
+        )
+
+        ax.set_ylabel(
+            "Feature"
+        )
 
         st.pyplot(
-            rf_fig,
+            fig,
             use_container_width=True
         )
 
-        plt.close(
-            rf_fig
-        )
-
-        st.caption(
-            "Feature importance reflects model behavior and "
-            "should not be interpreted as clinical causality."
-        )
-
-
-# ============================================================
-# BASELINE INTERPRETATION
-# ============================================================
-
-st.divider()
-
-st.header(
-    "📌 Baseline Interpretation"
-)
-
-best_model = all_results_df[
-    "Recall"
-].idxmax()
-
-best_recall = all_results_df.loc[
-    best_model,
-    "Recall"
-]
-
-best_macro_model = all_results_df[
-    "Macro Recall"
-].idxmax()
-
-best_macro_recall = all_results_df.loc[
-    best_macro_model,
-    "Macro Recall"
-]
-
-st.success(
-    f"""
-    **Best model by weighted Recall: {best_model}**
-
-    Weighted Recall: **{best_recall:.4f}**
-
-    Best model by Macro Recall:
-    **{best_macro_model}**
-
-    Macro Recall: **{best_macro_recall:.4f}**
-    """
-)
-
-st.markdown(
-    """
-    ### Why both metrics matter
-
-    **Weighted Recall** accounts for the number of observations
-    in each class. Because NSP 1 is the majority class, it can
-    have a strong influence on this metric.
-
-    **Macro Recall** calculates Recall independently for each
-    class and then gives every class equal importance.
-
-    Therefore, for this imbalanced dataset, the final model
-    should not be selected using weighted Recall alone.
-
-
-    """
-)
+        plt.close(fig)
 
 
 # ============================================================
 # FOOTER
 # ============================================================
 
-st.divider()
+st.markdown(
+    "---"
+)
 
 st.caption(
-    "Cardiotocography ML Assignment | "
-    "Baseline Evaluation | "
-    "Models loaded from .pkl files "
+    "Cardiotocography Classification | "
+    "Machine Learning Assignment"
+)
+
+st.caption(
+    "AUC is calculated using multiclass "
+    "One-vs-Rest (OvR) ROC-AUC with macro averaging."
 )
