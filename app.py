@@ -2,43 +2,26 @@
 Cardiotocography ML Assignment
 ==============================
 
-Streamlit Evaluation Dashboard
+Streamlit Model Evaluation Dashboard
 
-This application evaluates five pre-trained baseline models:
+Features
+--------
+1. Upload a CSV test dataset
+2. Use the bundled test_data.csv
+3. Download the bundled test dataset
+4. Select any trained model
+5. Display selected-model metrics prominently
+6. Display selected-model confusion matrix
+7. Display selected-model classification report
+8. Compare all available models
+9. Display confusion matrices and reports for all models
+10. Display class distribution
+11. Display weighted vs macro metrics
+12. Display Random Forest feature importance
 
-1. Logistic Regression
-2. Decision Tree
-3. K-Nearest Neighbors
-4. Gaussian Naive Bayes
-5. Random Forest
+Note: This application ONLY evaluates already-trained models.
 
-IMPORTANT
----------
-- Models are NOT retrained in this application.
-- The test dataset remains untouched.
-- No SMOTE is applied.
-- No undersampling is applied.
-- No class balancing is applied.
-- Saved scalers are used where required.
-- This dashboard represents BASELINE model evaluation.
 
-Project structure expected:
-
-project/
-│
-├── app.py
-├── test_data.csv
-│
-├── model/
-│   ├── logistic_regression.pkl
-│   ├── logistic_regression_scaler.pkl
-│   ├── decision_tree.pkl
-│   ├── knn.pkl
-│   ├── knn_scaler.pkl
-│   ├── naive_bayes.pkl
-│   └── random_forest.pkl
-│
-└── ...
 """
 
 from pathlib import Path
@@ -61,9 +44,8 @@ from sklearn.metrics import (
 )
 
 
-# ============================================================
+
 # PAGE CONFIGURATION
-# ============================================================
 
 st.set_page_config(
     page_title="CTG Model Evaluation",
@@ -85,6 +67,17 @@ MODEL_DIRECTORY = PROJECT_ROOT / "model"
 
 
 # ============================================================
+# CONSTANTS
+# ============================================================
+
+TARGET_COLUMN = "NSP"
+
+NON_PREDICTIVE_COLUMNS = [
+    "CLASS"
+]
+
+
+# ============================================================
 # MODEL CONFIGURATION
 # ============================================================
 
@@ -95,8 +88,7 @@ MODEL_CONFIG = {
         "scaler_file": "logistic_regression_scaler.pkl",
         "requires_scaling": True,
         "description": (
-            "Linear classification model using logistic "
-            "regression."
+            "Linear classification model using logistic regression."
         ),
     },
 
@@ -105,8 +97,7 @@ MODEL_CONFIG = {
         "scaler_file": None,
         "requires_scaling": False,
         "description": (
-            "Tree-based model using recursive feature "
-            "splitting."
+            "Tree-based classification model using recursive feature splitting."
         ),
     },
 
@@ -115,8 +106,7 @@ MODEL_CONFIG = {
         "scaler_file": "knn_scaler.pkl",
         "requires_scaling": True,
         "description": (
-            "Distance-based classifier using the nearest "
-            "training observations."
+            "Distance-based classifier using nearest observations."
         ),
     },
 
@@ -125,8 +115,7 @@ MODEL_CONFIG = {
         "scaler_file": None,
         "requires_scaling": False,
         "description": (
-            "Probabilistic classifier using Gaussian "
-            "feature distributions."
+            "Probabilistic classifier assuming Gaussian feature distributions."
         ),
     },
 
@@ -135,28 +124,14 @@ MODEL_CONFIG = {
         "scaler_file": None,
         "requires_scaling": False,
         "description": (
-            "Ensemble of decision trees using aggregated "
-            "tree predictions."
+            "Ensemble model combining predictions from multiple decision trees."
         ),
     },
 }
 
 
 # ============================================================
-# GENERAL CONSTANTS
-# ============================================================
-
-TARGET_COLUMN = "NSP"
-
-NON_PREDICTIVE_COLUMNS = [
-    "CLASS"
-]
-
-RANDOM_STATE = 42
-
-
-# ============================================================
-# CUSTOM CSS
+# CSS
 # ============================================================
 
 st.markdown(
@@ -182,27 +157,6 @@ st.markdown(
         margin-bottom: 0.8rem;
     }
 
-    .info-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 1px solid #dddddd;
-        background-color: #f8f9fa;
-    }
-
-    .warning-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 1px solid #e0c060;
-        background-color: #fff8dc;
-    }
-
-    .success-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 1px solid #7bbf7b;
-        background-color: #f0fff0;
-    }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -210,30 +164,13 @@ st.markdown(
 
 
 # ============================================================
-# DATA LOADING
-# ============================================================
-
-@st.cache_data
-def load_test_data():
-
-    if not TEST_FILE.exists():
-
-        raise FileNotFoundError(
-            f"Test dataset not found:\n{TEST_FILE}"
-        )
-
-    return pd.read_csv(TEST_FILE)
-
-
-# ============================================================
-# MODEL LOADING
+# LOAD MODEL
 # ============================================================
 
 @st.cache_resource
 def load_model(model_path):
 
     if not model_path.exists():
-
         raise FileNotFoundError(
             f"Model file not found:\n{model_path}"
         )
@@ -242,14 +179,13 @@ def load_model(model_path):
 
 
 # ============================================================
-# SCALER LOADING
+# LOAD SCALER
 # ============================================================
 
 @st.cache_resource
 def load_scaler(scaler_path):
 
     if not scaler_path.exists():
-
         raise FileNotFoundError(
             f"Scaler file not found:\n{scaler_path}"
         )
@@ -258,35 +194,70 @@ def load_scaler(scaler_path):
 
 
 # ============================================================
-# DATA PREPARATION
+# LOAD BUNDLED TEST DATA
+# ============================================================
+
+@st.cache_data
+def load_bundled_test_data():
+
+    if not TEST_FILE.exists():
+        raise FileNotFoundError(
+            f"Bundled test dataset not found:\n{TEST_FILE}"
+        )
+
+    return pd.read_csv(TEST_FILE)
+
+
+# ============================================================
+# PREPARE DATA
 # ============================================================
 
 def prepare_test_data(df):
 
     """
-    Separate target and predictor variables.
+    Prepare uploaded or bundled dataset.
 
-    Target:
-        NSP
+    Required:
+        NSP target column
 
-    Non-predictive:
-        CLASS
+    Optional:
+        CLASS is removed because it is non-predictive.
+
+    Returns:
+        X, y
     """
+
+    df = df.copy()
+
+    # --------------------------------------------------------
+    # Validate target
+    # --------------------------------------------------------
 
     if TARGET_COLUMN not in df.columns:
 
         raise ValueError(
-            f"Target column '{TARGET_COLUMN}' "
-            "was not found."
+            f"Required target column '{TARGET_COLUMN}' "
+            "was not found in the uploaded CSV."
         )
 
+    # --------------------------------------------------------
+    # Target
+    # --------------------------------------------------------
+
     y = df[TARGET_COLUMN].copy()
+
+    # --------------------------------------------------------
+    # Features
+    # --------------------------------------------------------
 
     X = df.drop(
         columns=[TARGET_COLUMN]
     )
 
-    # Remove non-predictive column if present
+    # --------------------------------------------------------
+    # Remove non-predictive columns
+    # --------------------------------------------------------
+
     for column in NON_PREDICTIVE_COLUMNS:
 
         if column in X.columns:
@@ -295,14 +266,104 @@ def prepare_test_data(df):
                 columns=[column]
             )
 
+    # --------------------------------------------------------
+    # Validate numeric features
+    # --------------------------------------------------------
+
+    non_numeric_columns = (
+        X.select_dtypes(
+            exclude=np.number
+        ).columns.tolist()
+    )
+
+    if non_numeric_columns:
+
+        raise ValueError(
+            "The following feature columns are not numeric:\n"
+            + ", ".join(non_numeric_columns)
+        )
+
+    # --------------------------------------------------------
+    # Missing values
+    # --------------------------------------------------------
+
+    missing_count = int(
+        X.isna().sum().sum()
+    )
+
+    if missing_count > 0:
+
+        raise ValueError(
+            f"The dataset contains {missing_count} missing "
+            "feature values. Please provide a cleaned dataset."
+        )
+
     return X, y
 
 
 # ============================================================
-# METRIC CALCULATION
+# VALIDATE FEATURES
 # ============================================================
 
-def calculate_metrics(y_true, y_pred):
+def validate_features(X, expected_features):
+
+    """
+    Ensure uploaded dataset contains exactly the features
+    expected by the trained models.
+    """
+
+    missing_features = [
+        feature
+        for feature in expected_features
+        if feature not in X.columns
+    ]
+
+    extra_features = [
+        feature
+        for feature in X.columns
+        if feature not in expected_features
+    ]
+
+    if missing_features:
+
+        raise ValueError(
+            "The uploaded dataset is missing required "
+            f"feature columns:\n{missing_features}"
+        )
+
+    # Keep only the features used during training
+    X = X[expected_features].copy()
+
+    return X, extra_features
+
+
+# ============================================================
+# GET EXPECTED FEATURES
+# ============================================================
+
+def get_expected_features():
+
+    """
+    Determine feature names from the bundled test dataset.
+    """
+
+    bundled_df = load_bundled_test_data()
+
+    X, _ = prepare_test_data(
+        bundled_df
+    )
+
+    return X.columns.tolist()
+
+
+# ============================================================
+# CALCULATE METRICS
+# ============================================================
+
+def calculate_metrics(
+    y_true,
+    y_pred
+):
 
     return {
 
@@ -366,10 +427,10 @@ def calculate_metrics(y_true, y_pred):
 
 
 # ============================================================
-# PER CLASS METRICS
+# CLASSIFICATION REPORT
 # ============================================================
 
-def calculate_per_class_metrics(
+def get_classification_report_df(
     y_true,
     y_pred
 ):
@@ -383,41 +444,74 @@ def calculate_per_class_metrics(
 
     rows = []
 
-    classes = sorted(
-        y_true.unique()
+    for key, value in report.items():
+
+        if key in [
+            "accuracy",
+            "macro avg",
+            "weighted avg"
+        ]:
+            continue
+
+        rows.append(
+            {
+                "Class": f"NSP {key}",
+                "Precision": value["precision"],
+                "Recall": value["recall"],
+                "F1 Score": value["f1-score"],
+                "Support": int(
+                    value["support"]
+                ),
+            }
+        )
+
+    # Add summary rows
+
+    rows.append(
+        {
+            "Class": "Macro Average",
+            "Precision": report[
+                "macro avg"
+            ]["precision"],
+            "Recall": report[
+                "macro avg"
+            ]["recall"],
+            "F1 Score": report[
+                "macro avg"
+            ]["f1-score"],
+            "Support": int(
+                report[
+                    "macro avg"
+                ]["support"]
+            ),
+        }
     )
 
-    for class_value in classes:
-
-        class_string = str(class_value)
-
-        if class_string in report:
-
-            rows.append(
-                {
-                    "Class": f"NSP {class_value}",
-                    "Precision": report[
-                        class_string
-                    ]["precision"],
-                    "Recall": report[
-                        class_string
-                    ]["recall"],
-                    "F1 Score": report[
-                        class_string
-                    ]["f1-score"],
-                    "Support": int(
-                        report[
-                            class_string
-                        ]["support"]
-                    ),
-                }
-            )
+    rows.append(
+        {
+            "Class": "Weighted Average",
+            "Precision": report[
+                "weighted avg"
+            ]["precision"],
+            "Recall": report[
+                "weighted avg"
+            ]["recall"],
+            "F1 Score": report[
+                "weighted avg"
+            ]["f1-score"],
+            "Support": int(
+                report[
+                    "weighted avg"
+                ]["support"]
+            ),
+        }
+    )
 
     return pd.DataFrame(rows)
 
 
 # ============================================================
-# CONFUSION MATRIX PLOT
+# CONFUSION MATRIX
 # ============================================================
 
 def plot_confusion_matrix(
@@ -468,7 +562,6 @@ def plot_confusion_matrix(
         title=f"{model_name} — Confusion Matrix",
     )
 
-    # Write values inside cells
     threshold = cm.max() / 2
 
     for i in range(
@@ -500,17 +593,23 @@ def plot_confusion_matrix(
 
 
 # ============================================================
-# GENERIC BAR CHART
+# METRIC COMPARISON CHART
 # ============================================================
 
 def plot_metric_comparison(
-    results_df,
-    metrics
+    results_df
 ):
+
+    metrics = [
+        "Accuracy",
+        "Precision",
+        "Recall",
+        "F1 Score",
+    ]
 
     plot_df = results_df[
         metrics
-    ].copy()
+    ]
 
     fig, ax = plt.subplots(
         figsize=(11, 5.5)
@@ -520,25 +619,19 @@ def plot_metric_comparison(
         len(plot_df.index)
     )
 
-    width = 0.8 / len(metrics)
+    width = 0.18
 
     for i, metric in enumerate(
         metrics
     ):
 
-        positions = (
-            x
-            + i * width
-            - (
-                len(metrics) - 1
-            ) * width / 2
-        )
-
         ax.bar(
-            positions,
+            x + (
+                i - 1.5
+            ) * width,
             plot_df[metric],
-            width=width,
-            label=metric,
+            width,
+            label=metric
         )
 
     ax.set_xticks(x)
@@ -559,172 +652,10 @@ def plot_metric_comparison(
     )
 
     ax.set_title(
-        "Baseline Model Performance"
-    )
-
-    ax.legend(
-        loc="upper right"
-    )
-
-    ax.grid(
-        axis="y",
-        alpha=0.25
-    )
-
-    fig.tight_layout()
-
-    return fig
-
-
-# ============================================================
-# RECALL COMPARISON
-# ============================================================
-
-def plot_recall_comparison(
-    results_df
-):
-
-    plot_df = results_df[
-        [
-            "Macro Recall",
-            "Recall"
-        ]
-    ].copy()
-
-    fig, ax = plt.subplots(
-        figsize=(10, 5)
-    )
-
-    x = np.arange(
-        len(plot_df.index)
-    )
-
-    width = 0.35
-
-    ax.bar(
-        x - width / 2,
-        plot_df["Recall"],
-        width,
-        label="Weighted Recall"
-    )
-
-    ax.bar(
-        x + width / 2,
-        plot_df["Macro Recall"],
-        width,
-        label="Macro Recall"
-    )
-
-    ax.set_xticks(x)
-
-    ax.set_xticklabels(
-        plot_df.index,
-        rotation=20,
-        ha="right"
-    )
-
-    ax.set_ylabel(
-        "Recall"
-    )
-
-    ax.set_ylim(
-        0,
-        1.05
-    )
-
-    ax.set_title(
-        "Weighted Recall vs Macro Recall"
+        "Performance Comparison — All Models"
     )
 
     ax.legend()
-
-    ax.grid(
-        axis="y",
-        alpha=0.25
-    )
-
-    fig.tight_layout()
-
-    return fig
-
-
-# ============================================================
-# PER CLASS RECALL CHART
-# ============================================================
-
-def plot_per_class_recall(
-    per_class_results
-):
-
-    pivot_df = (
-        per_class_results
-        .pivot(
-            index="Model",
-            columns="Class",
-            values="Recall"
-        )
-    )
-
-    fig, ax = plt.subplots(
-        figsize=(11, 5.5)
-    )
-
-    x = np.arange(
-        len(pivot_df.index)
-    )
-
-    number_of_classes = len(
-        pivot_df.columns
-    )
-
-    width = (
-        0.8 /
-        number_of_classes
-    )
-
-    for i, class_name in enumerate(
-        pivot_df.columns
-    ):
-
-        positions = (
-            x
-            + i * width
-            - (
-                number_of_classes - 1
-            ) * width / 2
-        )
-
-        ax.bar(
-            positions,
-            pivot_df[class_name],
-            width=width,
-            label=class_name,
-        )
-
-    ax.set_xticks(x)
-
-    ax.set_xticklabels(
-        pivot_df.index,
-        rotation=20,
-        ha="right"
-    )
-
-    ax.set_ylabel(
-        "Recall"
-    )
-
-    ax.set_ylim(
-        0,
-        1.05
-    )
-
-    ax.set_title(
-        "Per-Class Recall Across Models"
-    )
-
-    ax.legend(
-        title="Class"
-    )
 
     ax.grid(
         axis="y",
@@ -750,7 +681,6 @@ def plot_feature_importance(
         model,
         "feature_importances_"
     ):
-
         return None
 
     importance_df = pd.DataFrame(
@@ -783,11 +713,11 @@ def plot_feature_importance(
     )
 
     ax.set_xlabel(
-        "Feature Importance"
+        "Importance"
     )
 
     ax.set_title(
-        "Random Forest — Top Feature Importance"
+        "Random Forest — Top 10 Feature Importance"
     )
 
     ax.grid(
@@ -801,7 +731,7 @@ def plot_feature_importance(
 
 
 # ============================================================
-# PAGE HEADER
+# HEADER
 # ============================================================
 
 st.markdown(
@@ -813,51 +743,208 @@ st.markdown(
 
 st.markdown(
     '<div class="subtitle">'
-    'Baseline Machine Learning Model Evaluation Dashboard'
+    'Machine Learning Model Evaluation Dashboard'
     '</div>',
     unsafe_allow_html=True
 )
 
-st.info(
-    """
-    This dashboard evaluates five pre-trained machine learning
-    models using the **untouched test dataset**.
 
-    Models are loaded from saved `.pkl` files. No model is
-    retrained and no SMOTE, undersampling, or class balancing
-    is applied during this baseline evaluation.
-    """
-)
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+with st.sidebar:
+
+    st.header(
+        "⚙️ Evaluation Settings"
+    )
+
+    st.subheader(
+        "1. Select Dataset"
+    )
+
+    dataset_source = st.radio(
+        "Dataset source",
+        [
+            "Use bundled test data",
+            "Upload CSV"
+        ],
+        index=0
+    )
+
+    st.divider()
+
+    st.subheader(
+        "2. Select Model"
+    )
+
+    selected_model = st.selectbox(
+        "Model",
+        list(
+            MODEL_CONFIG.keys()
+        )
+    )
+
+    st.divider()
+
+    st.subheader(
+        "Baseline Configuration"
+    )
+
+    st.caption(
+        """
+        Models are evaluated using saved `.pkl`files.
+
+        """
+    )
 
 
 # ============================================================
-# LOAD DATA
+# DATASET SELECTION
+# ============================================================
+
+uploaded_file = None
+
+if dataset_source == "Upload CSV":
+
+    uploaded_file = st.file_uploader(
+        "Upload test CSV",
+        type=["csv"],
+        help=(
+            "CSV must contain NSP and the 21 "
+            "predictor variables."
+        )
+    )
+
+    if uploaded_file is None:
+
+        st.info(
+            "Please upload a CSV file from the sidebar "
+            "to begin evaluation."
+        )
+
+        st.stop()
+
+    try:
+
+        test_df = pd.read_csv(
+            uploaded_file
+        )
+
+        dataset_name = uploaded_file.name
+
+    except Exception as error:
+
+        st.error(
+            f"Unable to read uploaded CSV:\n{error}"
+        )
+
+        st.stop()
+
+else:
+
+    try:
+
+        test_df = load_bundled_test_data()
+
+        dataset_name = TEST_FILE.name
+
+    except Exception as error:
+
+        st.error(
+            f"Unable to load bundled test data:\n{error}"
+        )
+
+        st.stop()
+
+
+# ============================================================
+# DOWNLOAD BUNDLED TEST DATA
+# ============================================================
+
+if TEST_FILE.exists():
+
+    try:
+
+        bundled_test_df = load_bundled_test_data()
+
+        csv_data = bundled_test_df.to_csv(
+            index=False
+        ).encode(
+            "utf-8"
+        )
+
+        st.sidebar.download_button(
+            label="⬇️ Download Bundled Test Data",
+            data=csv_data,
+            file_name="test_data.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# PREPARE DATASET
 # ============================================================
 
 try:
-
-    test_df = load_test_data()
 
     X_test, y_test = prepare_test_data(
         test_df
     )
 
+    expected_features = (
+        get_expected_features()
+    )
+
+    X_test, extra_features = validate_features(
+        X_test,
+        expected_features
+    )
+
 except Exception as error:
 
     st.error(
-        f"Unable to load or prepare the test dataset:\n\n{error}"
+        f"Dataset validation failed:\n\n{error}"
     )
 
     st.stop()
 
 
 # ============================================================
-# DATASET OVERVIEW
+# DATASET INFORMATION
+# ============================================================
+
+st.info(
+    f"""
+    **Dataset in use:** `{dataset_name}`
+
+    **Samples:** {len(test_df):,}  
+    **Features:** {X_test.shape[1]}  
+    **Target:** `{TARGET_COLUMN}`  
+    **Classes:** {y_test.nunique()}
+    """
+)
+
+if extra_features:
+
+    st.warning(
+        "The following extra columns were ignored because "
+        "they were not used during model training:\n\n"
+        + ", ".join(extra_features)
+    )
+
+
+# ============================================================
+# CLASS DISTRIBUTION
 # ============================================================
 
 st.markdown(
     '<div class="section-title">'
-    'Test Dataset Overview'
+    'Dataset Overview'
     '</div>',
     unsafe_allow_html=True
 )
@@ -867,7 +954,7 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
 
     st.metric(
-        "Test Samples",
+        "Samples",
         f"{len(test_df):,}"
     )
 
@@ -892,17 +979,6 @@ with col4:
         TARGET_COLUMN
     )
 
-
-# ============================================================
-# CLASS DISTRIBUTION
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">'
-    'Class Distribution'
-    '</div>',
-    unsafe_allow_html=True
-)
 
 class_counts = (
     y_test
@@ -933,130 +1009,319 @@ distribution_df[
     "Percentage"
 ].round(2)
 
-col_distribution, col_warning = st.columns(
-    [1.3, 1]
+
+with st.expander(
+    "View Class Distribution"
+):
+
+    col1, col2 = st.columns(
+        [1, 1]
+    )
+
+    with col1:
+
+        st.dataframe(
+            distribution_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    with col2:
+
+        majority_class = (
+            class_percentages.idxmax()
+        )
+
+        minority_class = (
+            class_percentages.idxmin()
+        )
+
+        st.warning(
+            f"""
+            **Class imbalance**
+
+            Majority class:
+
+            **NSP {majority_class}**
+            ({class_percentages.max():.2f}%)
+
+            Minority class:
+
+            **NSP {minority_class}**
+            ({class_percentages.min():.2f}%)
+
+            Therefore, weighted metrics should not be
+            considered alone.
+            """
+        )
+
+
+# ============================================================
+# EVALUATE SELECTED MODEL
+# ============================================================
+
+selected_config = MODEL_CONFIG[
+    selected_model
+]
+
+selected_model_path = (
+    MODEL_DIRECTORY /
+    selected_config["model_file"]
 )
 
-with col_distribution:
+try:
+
+    selected_model_object = load_model(
+        selected_model_path
+    )
+
+except Exception as error:
+
+    st.error(
+        f"Unable to load {selected_model}:\n{error}"
+    )
+
+    st.stop()
+
+
+# ------------------------------------------------------------
+# Apply scaler
+# ------------------------------------------------------------
+
+X_selected = X_test.copy()
+
+if selected_config[
+    "requires_scaling"
+]:
+
+    scaler_path = (
+        MODEL_DIRECTORY /
+        selected_config["scaler_file"]
+    )
+
+    try:
+
+        scaler = load_scaler(
+            scaler_path
+        )
+
+        X_selected = scaler.transform(
+            X_selected
+        )
+
+    except Exception as error:
+
+        st.error(
+            f"Unable to load scaler for "
+            f"{selected_model}:\n{error}"
+        )
+
+        st.stop()
+
+
+# ------------------------------------------------------------
+# Prediction
+# ------------------------------------------------------------
+
+try:
+
+    selected_predictions = (
+        selected_model_object.predict(
+            X_selected
+        )
+    )
+
+except Exception as error:
+
+    st.error(
+        f"Prediction failed for {selected_model}:\n{error}"
+    )
+
+    st.stop()
+
+
+# ============================================================
+# SELECTED MODEL — TOP METRICS
+# ============================================================
+
+selected_metrics = calculate_metrics(
+    y_test,
+    selected_predictions
+)
+
+st.divider()
+
+st.header(
+    f"🎯 Selected Model: {selected_model}"
+)
+
+st.caption(
+    MODEL_CONFIG[
+        selected_model
+    ]["description"]
+)
+
+
+# ------------------------------------------------------------
+# Primary metrics
+# ------------------------------------------------------------
+
+metric_cols = st.columns(5)
+
+primary_metrics = [
+    ("Accuracy", "Accuracy"),
+    ("Precision", "Precision"),
+    ("Recall", "Recall"),
+    ("F1 Score", "F1 Score"),
+    ("Balanced Accuracy", "Balanced Accuracy"),
+]
+
+for column, (
+    label,
+    key
+) in zip(
+    metric_cols,
+    primary_metrics
+):
+
+    with column:
+
+        st.metric(
+            label,
+            f"{selected_metrics[key]:.4f}"
+        )
+
+
+# ------------------------------------------------------------
+# Additional metrics
+# ------------------------------------------------------------
+
+with st.expander(
+    "View Additional Metrics"
+):
+
+    additional_metrics_df = pd.DataFrame(
+        {
+            "Metric": [
+                "Macro Precision",
+                "Macro Recall",
+                "Macro F1",
+                "MCC",
+            ],
+            "Score": [
+                selected_metrics[
+                    "Macro Precision"
+                ],
+                selected_metrics[
+                    "Macro Recall"
+                ],
+                selected_metrics[
+                    "Macro F1"
+                ],
+                selected_metrics[
+                    "MCC"
+                ],
+            ],
+        }
+    )
 
     st.dataframe(
-        distribution_df,
+        additional_metrics_df.style.format(
+            {
+                "Score": "{:.4f}"
+            }
+        ),
         use_container_width=True,
         hide_index=True
     )
 
-with col_warning:
 
-    majority_percentage = (
-        class_percentages.max()
+# ============================================================
+# SELECTED MODEL — CONFUSION MATRIX + REPORT
+# ============================================================
+
+st.subheader(
+    "Selected Model Evaluation"
+)
+
+selected_col1, selected_col2 = st.columns(
+    [1, 1]
+)
+
+labels = sorted(
+    y_test.unique()
+)
+
+with selected_col1:
+
+    st.markdown(
+        "### Confusion Matrix"
     )
 
-    minority_percentage = (
-        class_percentages.min()
+    cm_fig = plot_confusion_matrix(
+        y_test,
+        selected_predictions,
+        selected_model,
+        labels
     )
 
-    majority_class = (
-        class_percentages.idxmax()
+    st.pyplot(
+        cm_fig,
+        use_container_width=True
     )
 
-    minority_class = (
-        class_percentages.idxmin()
+    plt.close(
+        cm_fig
     )
 
-    st.warning(
-        f"""
-        **Class imbalance detected**
 
-        Majority class: **NSP {majority_class}**
-        ({majority_percentage:.2f}%)
+with selected_col2:
 
-        Minority class: **NSP {minority_class}**
-        ({minority_percentage:.2f}%)
+    st.markdown(
+        "### Classification Report"
+    )
 
-        Weighted metrics may therefore be strongly
-        influenced by the majority class.
+    selected_report_df = (
+        get_classification_report_df(
+            y_test,
+            selected_predictions
+        )
+    )
 
-        Minority-class recall should be examined
-        before final model selection.
-        """
+    st.dataframe(
+        selected_report_df.style.format(
+            {
+                "Precision": "{:.4f}",
+                "Recall": "{:.4f}",
+                "F1 Score": "{:.4f}",
+            }
+        ),
+        use_container_width=True,
+        hide_index=True
     )
 
 
 # ============================================================
-# CLASS DISTRIBUTION CHART
+# ALL MODEL EVALUATION
 # ============================================================
 
-fig, ax = plt.subplots(
-    figsize=(8, 4)
+st.divider()
+
+st.header(
+    "📊 All Model Evaluation"
 )
 
-ax.bar(
-    [
-        f"NSP {x}"
-        for x in class_counts.index
-    ],
-    class_counts.values
+st.caption(
+    "All available trained models are evaluated on the same "
+    "dataset selected above."
 )
 
-ax.set_xlabel(
-    "NSP Class"
-)
 
-ax.set_ylabel(
-    "Number of Samples"
-)
+all_results = {}
 
-ax.set_title(
-    "Test Set Class Distribution"
-)
+all_predictions = {}
 
-ax.grid(
-    axis="y",
-    alpha=0.25
-)
-
-for i, value in enumerate(
-    class_counts.values
-):
-
-    ax.text(
-        i,
-        value,
-        f"{value}",
-        ha="center",
-        va="bottom"
-    )
-
-fig.tight_layout()
-
-st.pyplot(
-    fig,
-    use_container_width=True
-)
-
-plt.close(fig)
-
-
-# ============================================================
-# MODEL EVALUATION
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">'
-    'Model Evaluation'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-results = {}
-
-predictions = {}
-
-per_class_results = {}
-
-confusion_matrices = {}
-
-loaded_models = {}
+all_models = {}
 
 model_errors = {}
 
@@ -1078,18 +1343,18 @@ for model_name, config in MODEL_CONFIG.items():
             model_path
         )
 
-        loaded_models[
+        all_models[
             model_name
         ] = model
 
         # ----------------------------------------------------
-        # Prepare test features
+        # Prepare features
         # ----------------------------------------------------
 
         X_input = X_test.copy()
 
         # ----------------------------------------------------
-        # Apply saved scaler where required
+        # Scaling
         # ----------------------------------------------------
 
         if config[
@@ -1110,61 +1375,26 @@ for model_name, config in MODEL_CONFIG.items():
             )
 
         # ----------------------------------------------------
-        # Prediction
+        # Predict
         # ----------------------------------------------------
 
         y_pred = model.predict(
             X_input
         )
 
-        predictions[
+        all_predictions[
             model_name
         ] = y_pred
 
         # ----------------------------------------------------
-        # Overall metrics
+        # Metrics
         # ----------------------------------------------------
 
-        results[
+        all_results[
             model_name
         ] = calculate_metrics(
             y_test,
             y_pred
-        )
-
-        # ----------------------------------------------------
-        # Per-class metrics
-        # ----------------------------------------------------
-
-        class_df = (
-            calculate_per_class_metrics(
-                y_test,
-                y_pred
-            )
-        )
-
-        class_df[
-            "Model"
-        ] = model_name
-
-        per_class_results[
-            model_name
-        ] = class_df
-
-        # ----------------------------------------------------
-        # Confusion matrix
-        # ----------------------------------------------------
-
-        labels = sorted(
-            y_test.unique()
-        )
-
-        confusion_matrices[
-            model_name
-        ] = confusion_matrix(
-            y_test,
-            y_pred,
-            labels=labels
         )
 
     except Exception as error:
@@ -1175,13 +1405,13 @@ for model_name, config in MODEL_CONFIG.items():
 
 
 # ============================================================
-# MODEL LOADING STATUS
+# DISPLAY MODEL ERRORS
 # ============================================================
 
 if model_errors:
 
     st.warning(
-        "One or more models could not be evaluated."
+        "Some models could not be evaluated."
     )
 
     for model_name, error in model_errors.items():
@@ -1191,737 +1421,228 @@ if model_errors:
         )
 
 
-if not results:
+if not all_results:
 
     st.error(
-        "No models could be evaluated."
+        "No models were successfully evaluated."
     )
 
     st.stop()
 
 
 # ============================================================
-# RESULTS DATAFRAME
+# ALL MODEL METRICS TABLE
 # ============================================================
 
-results_df = pd.DataFrame(
-    results
+all_results_df = pd.DataFrame(
+    all_results
 ).T
 
-
-# ============================================================
-# MODEL RANKING
-# ============================================================
-
-ranking_df = results_df[
-    [
-        "Accuracy",
-        "Precision",
-        "Recall",
-        "F1 Score",
-        "Macro Recall",
-        "Balanced Accuracy",
-    ]
-].copy()
-
-ranking_df = ranking_df.sort_values(
+all_results_df = all_results_df.sort_values(
     "Recall",
     ascending=False
 )
 
-
-# ============================================================
-# BEST MODEL SUMMARY
-# ============================================================
-
-best_weighted_recall_model = (
-    results_df[
-        "Recall"
-    ].idxmax()
+st.subheader(
+    "Evaluation Metrics — All Models"
 )
 
-best_weighted_recall = (
-    results_df.loc[
-        best_weighted_recall_model,
-        "Recall"
-    ]
-)
+display_columns = [
+    "Accuracy",
+    "Precision",
+    "Recall",
+    "F1 Score",
+    "Macro Recall",
+    "Balanced Accuracy",
+    "MCC",
+]
 
-best_macro_recall_model = (
-    results_df[
-        "Macro Recall"
-    ].idxmax()
-)
-
-best_macro_recall = (
-    results_df.loc[
-        best_macro_recall_model,
-        "Macro Recall"
-    ]
-)
-
-
-st.markdown(
-    '<div class="section-title">'
-    'Baseline Model Summary'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-
-    st.metric(
-        "Best Weighted Recall",
-        best_weighted_recall_model,
-        f"{best_weighted_recall:.4f}"
-    )
-
-with col2:
-
-    st.metric(
-        "Best Macro Recall",
-        best_macro_recall_model,
-        f"{best_macro_recall:.4f}"
-    )
-
-with col3:
-
-    st.metric(
-        "Models Evaluated",
-        len(results)
-    )
-
-
-st.success(
-    f"""
-    **Current baseline leader: {best_weighted_recall_model}**
-
-    It achieved the highest weighted Recall on the untouched
-    test set: **{best_weighted_recall:.4f}**.
-
-    However, weighted Recall alone should not determine the
-    final model because the dataset is imbalanced. Macro Recall
-    and per-class Recall are also considered below.
-    """
+st.dataframe(
+    all_results_df[
+        display_columns
+    ].style.format(
+        "{:.4f}"
+    ),
+    use_container_width=True
 )
 
 
 # ============================================================
-# TABS
+# ALL MODEL METRIC CHART
 # ============================================================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    [
-        "📊 Model Comparison",
-        "🎯 Per-Class Analysis",
-        "🔲 Confusion Matrices",
-        "🔍 Model Details",
-        "🌲 Feature Importance",
-    ]
+st.subheader(
+    "Metric Comparison"
+)
+
+metric_fig = plot_metric_comparison(
+    all_results_df
+)
+
+st.pyplot(
+    metric_fig,
+    use_container_width=True
+)
+
+plt.close(
+    metric_fig
 )
 
 
 # ============================================================
-# TAB 1 — MODEL COMPARISON
+# ALL MODEL CONFUSION MATRICES
 # ============================================================
 
-with tab1:
+st.divider()
 
-    st.subheader(
-        "Overall Model Performance"
-    )
+st.header(
+    "🔲 Confusion Matrices — All Models"
+)
 
-    display_metrics = ranking_df[
-        [
-            "Accuracy",
-            "Precision",
-            "Recall",
-            "F1 Score",
-            "Macro Recall",
-            "Balanced Accuracy",
-        ]
-    ].copy()
+for model_name, y_pred in all_predictions.items():
 
-    st.dataframe(
-        display_metrics.style.format(
-            "{:.4f}"
-        ),
-        use_container_width=True
-    )
+    with st.expander(
+        f"{model_name} — Confusion Matrix & Classification Report",
+        expanded=False
+    ):
 
-    st.caption(
-        "Recall is the primary metric for this assignment. "
-        "Macro Recall gives equal importance to each class, "
-        "while weighted Recall accounts for class frequency."
-    )
-
-    st.subheader(
-        "Metric Comparison"
-    )
-
-    metrics_to_plot = [
-        "Accuracy",
-        "Precision",
-        "Recall",
-        "F1 Score",
-    ]
-
-    metric_fig = plot_metric_comparison(
-        ranking_df,
-        metrics_to_plot
-    )
-
-    st.pyplot(
-        metric_fig,
-        use_container_width=True
-    )
-
-    plt.close(metric_fig)
-
-    st.subheader(
-        "Weighted Recall vs Macro Recall"
-    )
-
-    recall_fig = plot_recall_comparison(
-        ranking_df
-    )
-
-    st.pyplot(
-        recall_fig,
-        use_container_width=True
-    )
-
-    plt.close(recall_fig)
-
-    st.subheader(
-        "Model Ranking by Weighted Recall"
-    )
-
-    ranking_display = ranking_df[
-        [
-            "Recall",
-            "Macro Recall",
-            "F1 Score",
-            "Balanced Accuracy",
-        ]
-    ].copy()
-
-    ranking_display.insert(
-        0,
-        "Rank",
-        range(
-            1,
-            len(ranking_display) + 1
+        col1, col2 = st.columns(
+            [1, 1]
         )
-    )
 
-    st.dataframe(
-        ranking_display.style.format(
-            {
-                "Recall": "{:.4f}",
-                "Macro Recall": "{:.4f}",
-                "F1 Score": "{:.4f}",
-                "Balanced Accuracy": "{:.4f}",
-            }
-        ),
-        use_container_width=True
-    )
-
-
-# ============================================================
-# TAB 2 — PER CLASS ANALYSIS
-# ============================================================
-
-with tab2:
-
-    st.subheader(
-        "Per-Class Performance"
-    )
-
-    st.markdown(
-        """
-        Because the dataset is imbalanced, overall weighted metrics
-        can hide poor performance on minority classes.
-
-        The table below shows Precision, Recall and F1 Score
-        separately for each NSP class.
-        """
-    )
-
-    all_per_class = pd.concat(
-        per_class_results.values(),
-        ignore_index=True
-    )
-
-    all_per_class_display = all_per_class[
-        [
-            "Model",
-            "Class",
-            "Precision",
-            "Recall",
-            "F1 Score",
-            "Support",
-        ]
-    ]
-
-    st.dataframe(
-        all_per_class_display.style.format(
-            {
-                "Precision": "{:.4f}",
-                "Recall": "{:.4f}",
-                "F1 Score": "{:.4f}",
-            }
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.subheader(
-        "Per-Class Recall Comparison"
-    )
-
-    per_class_recall_fig = plot_per_class_recall(
-        all_per_class
-    )
-
-    st.pyplot(
-        per_class_recall_fig,
-        use_container_width=True
-    )
-
-    plt.close(
-        per_class_recall_fig
-    )
-
-    st.subheader(
-        "Detailed Model Analysis"
-    )
-
-    selected_model = st.selectbox(
-        "Select a model",
-        list(predictions.keys())
-    )
-
-    selected_class_df = (
-        per_class_results[
-            selected_model
-        ]
-        .copy()
-    )
-
-    selected_class_df = (
-        selected_class_df[
-            [
-                "Class",
-                "Precision",
-                "Recall",
-                "F1 Score",
-                "Support",
-            ]
-        ]
-    )
-
-    st.dataframe(
-        selected_class_df.style.format(
-            {
-                "Precision": "{:.4f}",
-                "Recall": "{:.4f}",
-                "F1 Score": "{:.4f}",
-            }
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # Identify weakest class for selected model
-    weakest_class_row = (
-        selected_class_df
-        .loc[
-            selected_class_df[
-                "Recall"
-            ].idxmin()
-        ]
-    )
-
-    st.warning(
-        f"""
-        For **{selected_model}**, the lowest class-specific
-        Recall is for **{weakest_class_row["Class"]}**:
-
-        **Recall = {weakest_class_row["Recall"]:.4f}**
-
-        This is important when evaluating the effect of class
-        balancing and SMOTE later.
-        """
-    )
-
-
-# ============================================================
-# TAB 3 — CONFUSION MATRICES
-# ============================================================
-
-with tab3:
-
-    st.subheader(
-        "Confusion Matrices"
-    )
-
-    st.markdown(
-        """
-        Rows represent the **actual NSP class** and columns
-        represent the **predicted NSP class**.
-
-        Values on the diagonal represent correct predictions.
-        Off-diagonal values represent classification errors.
-        """
-    )
-
-    selected_cm_model = st.selectbox(
-        "Select model",
-        list(confusion_matrices.keys()),
-        key="confusion_model"
-    )
-
-    labels = sorted(
-        y_test.unique()
-    )
-
-    cm_fig = plot_confusion_matrix(
-        y_test,
-        predictions[
-            selected_cm_model
-        ],
-        selected_cm_model,
-        labels
-    )
-
-    st.pyplot(
-        cm_fig,
-        use_container_width=False
-    )
-
-    plt.close(cm_fig)
-
-    st.subheader(
-        "All Model Confusion Matrices"
-    )
-
-    for model_name in confusion_matrices:
-
-        with st.expander(
-            model_name
-        ):
+        with col1:
 
             fig = plot_confusion_matrix(
                 y_test,
-                predictions[
-                    model_name
-                ],
+                y_pred,
                 model_name,
                 labels
             )
 
             st.pyplot(
                 fig,
-                use_container_width=False
+                use_container_width=True
             )
 
             plt.close(fig)
 
+        with col2:
 
-# ============================================================
-# TAB 4 — MODEL DETAILS
-# ============================================================
-
-with tab4:
-
-    st.subheader(
-        "Model Configuration"
-    )
-
-    selected_detail_model = st.selectbox(
-        "Select model",
-        list(MODEL_CONFIG.keys()),
-        key="details_model"
-    )
-
-    config = MODEL_CONFIG[
-        selected_detail_model
-    ]
-
-    model_object = loaded_models.get(
-        selected_detail_model
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.markdown(
-            "### Configuration"
-        )
-
-        st.write(
-            f"**Model:** {selected_detail_model}"
-        )
-
-        st.write(
-            f"**Scaling required:** "
-            f"{'Yes' if config['requires_scaling'] else 'No'}"
-        )
-
-        if config["requires_scaling"]:
-
-            st.write(
-                f"**Scaler:** "
-                f"{config['scaler_file']}"
-            )
-
-        st.write(
-            f"**Model file:** "
-            f"{config['model_file']}"
-        )
-
-        st.write(
-            f"**Test samples:** "
-            f"{len(X_test)}"
-        )
-
-        st.write(
-            f"**Features:** "
-            f"{X_test.shape[1]}"
-        )
-
-    with col2:
-
-        st.markdown(
-            "### Description"
-        )
-
-        st.write(
-            config["description"]
-        )
-
-        st.markdown(
-            "### Baseline Metrics"
-        )
-
-        model_metrics = results[
-            selected_detail_model
-        ]
-
-        for metric_name in [
-            "Accuracy",
-            "Precision",
-            "Recall",
-            "F1 Score",
-            "Macro Recall",
-            "Balanced Accuracy",
-        ]:
-
-            st.write(
-                f"**{metric_name}:** "
-                f"{model_metrics[metric_name]:.4f}"
-            )
-
-    # Show common model attributes where available
-    if model_object is not None:
-
-        st.markdown(
-            "### Model Parameters"
-        )
-
-        try:
-
-            params = model_object.get_params()
-
-            parameter_df = pd.DataFrame(
-                {
-                    "Parameter": params.keys(),
-                    "Value": [
-                        str(value)
-                        for value in params.values()
-                    ],
-                }
+            report_df = (
+                get_classification_report_df(
+                    y_test,
+                    y_pred
+                )
             )
 
             st.dataframe(
-                parameter_df,
+                report_df.style.format(
+                    {
+                        "Precision": "{:.4f}",
+                        "Recall": "{:.4f}",
+                        "F1 Score": "{:.4f}",
+                    }
+                ),
                 use_container_width=True,
                 hide_index=True
             )
 
-        except Exception:
-
-            st.info(
-                "Model parameters could not be displayed."
-            )
-
 
 # ============================================================
-# TAB 5 — FEATURE IMPORTANCE
-# ============================================================
-
-with tab5:
-
-    st.subheader(
-        "Random Forest Feature Importance"
-    )
-
-    st.markdown(
-        """
-        Random Forest provides model-derived feature importance
-        values based on the contribution of features to tree
-        splitting.
-
-        **Important:** These values indicate model behavior.
-        They should not be interpreted as clinical causality.
-        """
-    )
-
-    rf_model = loaded_models.get(
-        "Random Forest"
-    )
-
-    if rf_model is None:
-
-        st.warning(
-            "Random Forest model is not available."
-        )
-
-    elif not hasattr(
-        rf_model,
-        "feature_importances_"
-    ):
-
-        st.warning(
-            "The loaded Random Forest model does not provide "
-            "feature importance."
-        )
-
-    else:
-
-        feature_importance_df = pd.DataFrame(
-            {
-                "Feature": X_test.columns,
-                "Importance": (
-                    rf_model.feature_importances_
-                ),
-            }
-        )
-
-        feature_importance_df = (
-            feature_importance_df
-            .sort_values(
-                "Importance",
-                ascending=False
-            )
-            .reset_index(
-                drop=True
-            )
-        )
-
-        feature_importance_df.insert(
-            0,
-            "Rank",
-            range(
-                1,
-                len(feature_importance_df) + 1
-            )
-        )
-
-        st.dataframe(
-            feature_importance_df.style.format(
-                {
-                    "Importance": "{:.4f}"
-                }
-            ),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.subheader(
-            "Top 10 Features"
-        )
-
-        importance_fig = plot_feature_importance(
-            rf_model,
-            X_test.columns,
-            top_n=10
-        )
-
-        if importance_fig is not None:
-
-            st.pyplot(
-                importance_fig,
-                use_container_width=True
-            )
-
-            plt.close(
-                importance_fig
-            )
-
-
-# ============================================================
-# FINAL INTERPRETATION
+# RANDOM FOREST FEATURE IMPORTANCE
 # ============================================================
 
 st.divider()
 
 st.header(
-    "Baseline Interpretation"
+    "🌲 Random Forest Feature Importance"
+)
+
+rf_model = all_models.get(
+    "Random Forest"
+)
+
+if rf_model is not None:
+
+    rf_fig = plot_feature_importance(
+        rf_model,
+        X_test.columns,
+        top_n=10
+    )
+
+    if rf_fig is not None:
+
+        st.pyplot(
+            rf_fig,
+            use_container_width=True
+        )
+
+        plt.close(
+            rf_fig
+        )
+
+        st.caption(
+            "Feature importance reflects model behavior and "
+            "should not be interpreted as clinical causality."
+        )
+
+
+# ============================================================
+# BASELINE INTERPRETATION
+# ============================================================
+
+st.divider()
+
+st.header(
+    "📌 Baseline Interpretation"
+)
+
+best_model = all_results_df[
+    "Recall"
+].idxmax()
+
+best_recall = all_results_df.loc[
+    best_model,
+    "Recall"
+]
+
+best_macro_model = all_results_df[
+    "Macro Recall"
+].idxmax()
+
+best_macro_recall = all_results_df.loc[
+    best_macro_model,
+    "Macro Recall"
+]
+
+st.success(
+    f"""
+    **Best model by weighted Recall: {best_model}**
+
+    Weighted Recall: **{best_recall:.4f}**
+
+    Best model by Macro Recall:
+    **{best_macro_model}**
+
+    Macro Recall: **{best_macro_recall:.4f}**
+    """
 )
 
 st.markdown(
-    f"""
-### Current finding
-
-**{best_weighted_recall_model}** is the strongest baseline
-model according to weighted Recall, with a score of
-**{best_weighted_recall:.4f}**.
-
-However, the dataset is imbalanced. Therefore, the difference
-between **weighted Recall** and **Macro Recall** is important.
-
-### What we should investigate next
-
-The baseline results should now be used to answer:
-
-1. How well does each model detect the majority class?
-2. How well does each model detect NSP 2?
-3. How well does each model detect NSP 3?
-4. Does class imbalance reduce minority-class Recall?
-5. Does SMOTE improve minority-class performance?
-6. Does improving minority Recall negatively affect overall
-   performance?
-
-The next experimental stage should therefore compare the
-baseline models against models trained using appropriate
-class-balancing techniques.
-"""
-)
-
-
-# ============================================================
-# BASELINE STATUS
-# ============================================================
-
-st.info(
     """
-    **Baseline status**
+    ### Why both metrics matter
 
-    ✓ Test set remains untouched  
-    ✓ Models are loaded from saved `.pkl` files  
-    ✓ Saved scalers are used where required  
-    ✓ No SMOTE  
-    ✓ No undersampling  
-    ✓ No class weighting  
-    ✓ No retraining  
+    **Weighted Recall** accounts for the number of observations
+    in each class. Because NSP 1 is the majority class, it can
+    have a strong influence on this metric.
 
-    This provides a clean baseline for the next
-    class-imbalance experiments.
+    **Macro Recall** calculates Recall independently for each
+    class and then gives every class equal importance.
+
+    Therefore, for this imbalanced dataset, the final model
+    should not be selected using weighted Recall alone.
+
+
     """
 )
 
@@ -1934,6 +1655,6 @@ st.divider()
 
 st.caption(
     "Cardiotocography ML Assignment | "
-    "Baseline Evaluation Dashboard | "
-    "Test Set Remains Untouched"
+    "Baseline Evaluation | "
+    "Models loaded from .pkl files "
 )
